@@ -53,7 +53,7 @@ type Guest = {
   contact?: string;
 };
 
-type TicketStatus = "New" | "In progress" | "Resolved" | "Closed";
+type TicketStatus = "New" | "In progress" | "Dead" | "Resolved" | "Closed" | "N/A / Invalid";
 type Department = "Front Desk" | "Concierge" | "Maintenance" | "Housekeeping" | "Dining" | "Reservations";
 
 type Ticket = {
@@ -82,6 +82,10 @@ type Feedback = {
   rating: number;
   comment: string;
   destination: string;
+  guestName?: string;
+  guestEmail?: string;
+  status?: "New" | "Needs response" | "Responded" | "Closed";
+  response?: string;
 };
 
 type Notice = {
@@ -94,9 +98,10 @@ type Notice = {
 type DemoSyncEvent =
   | { type: "ticket-created"; ticket: Ticket }
   | { type: "ticket-status"; id: string; status: TicketStatus }
-  | { type: "feedback-created"; feedback: Feedback };
+  | { type: "feedback-created"; feedback: Feedback }
+  | { type: "feedback-response"; feedbackId: string; response: string; recipient: string };
 
-type View = "auth" | "home" | "concierge" | "requests" | "profile" | "ops";
+type View = "auth" | "home" | "concierge" | "requests" | "profile";
 type Sheet = "review" | "service" | "ticket" | "feedback" | "checkout" | "credits" | "notifications" | "hotel" | null;
 
 const hotels: Hotel[] = [
@@ -217,7 +222,7 @@ type ReportPeriod = typeof reportPeriods[number];
 const demoChannelName = "intellistay-live-demo";
 
 function statusClass(status: TicketStatus) {
-  return status.toLowerCase().replace(" ", "-");
+  return status.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 function estimateCredits(text: string) {
@@ -257,7 +262,7 @@ export default function Prototype() {
   const keyboard = useKeyboard();
   const [view, setView] = useState<View>(() => {
     const requested = new URLSearchParams(window.location.search).get("screen");
-    return (["home", "concierge", "requests", "profile", "ops"] as View[]).includes(requested as View) ? requested as View : "auth";
+    return (["home", "concierge", "requests", "profile"] as View[]).includes(requested as View) ? requested as View : "auth";
   });
   const [authMode, setAuthMode] = useState<"reservation" | "guest">("reservation");
   const [reservationCode, setReservationCode] = useState("AG-7K92");
@@ -284,9 +289,6 @@ export default function Prototype() {
   const [chatBusy, setChatBusy] = useState(false);
   const [credits, setCredits] = useState(1200);
   const [creditUsage, setCreditUsage] = useState<{ label: string; amount: number }[]>([{ label: "Arrival planning", amount: 84 }]);
-  const [opsComment, setOpsComment] = useState("");
-  const [simulatedMinutes, setSimulatedMinutes] = useState(0);
-  const [reportPeriod, setReportPeriod] = useState<ReportPeriod>("Daily");
   const [billView, setBillView] = useState<"Invoice" | "Itemized Bill">("Invoice");
   const [receiptEmail, setReceiptEmail] = useState(guest.contact?.includes("@") ? guest.contact : "");
   const [pushEnabled, setPushEnabled] = useState(false);
@@ -333,6 +335,10 @@ export default function Prototype() {
       if (update.type === "ticket-status") {
         setTickets((all) => all.map((ticket) => ticket.id === update.id ? { ...ticket, status: update.status } : ticket));
         notify(`${update.id} updated by hotel operations: ${update.status}.`);
+      }
+      if (update.type === "feedback-response") {
+        addNotice("Hotel replied to your feedback", update.response);
+        notify(`A hotel response is in Notifications and was sent to ${update.recipient}.`);
       }
     };
     return () => {
@@ -553,33 +559,6 @@ export default function Prototype() {
     notify(permission === "granted" ? "Push notifications enabled." : "Push stayed off; in-app alerts remain available.");
   };
 
-  const updateTicket = (id: string, status: TicketStatus) => {
-    const current = tickets.find((ticket) => ticket.id === id);
-    if (current?.hoursInProgress && current.hoursInProgress >= 4 && status === "Resolved" && !current.comments.length) return notify("Add an internal update before resolving this 4-hour alert.");
-    setTickets((all) => all.map((ticket) => ticket.id === id ? { ...ticket, status, hoursInProgress: status === "In progress" ? 0 : ticket.hoursInProgress } : ticket));
-    demoChannel.current?.postMessage({ type: "ticket-status", id, status } satisfies DemoSyncEvent);
-    notify(`${id} moved to ${status}.`);
-  };
-
-  const addOpsComment = (id: string) => {
-    if (!opsComment.trim()) return;
-    setTickets((all) => all.map((ticket) => ticket.id === id ? { ...ticket, comments: [...ticket.comments, opsComment.trim()] } : ticket));
-    setOpsComment("");
-    dismissKeyboard();
-    notify("Update saved; stall alert cleared.");
-  };
-
-  const exportReport = (period: ReportPeriod) => {
-    const rows = ["Ticket,Service,Department,Status,Priority,Minutes Open", ...tickets.map((ticket) => [ticket.id, `"${ticket.title}"`, ticket.department, ticket.status, ticket.priority, ticket.minutesOpen + simulatedMinutes].join(",")), "", "Feedback,Rating,Type,Destination", ...feedback.map((item) => [item.id, item.rating, `"${item.type}"`, item.destination].join(","))];
-    const url = URL.createObjectURL(new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `Intellistay-${period}-MIS.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    notify(`${period} MIS exported.`);
-  };
-
   const downloadStayPdf = async (kind: "Invoice" | "Itemized Bill") => {
     const { jsPDF } = await import("jspdf");
     const doc = new jsPDF();
@@ -607,7 +586,9 @@ export default function Prototype() {
 
   const submitFeedback = () => {
     if (!rating) return notify("Choose a rating before submitting.");
-    const item = { id: `FB-${110 + feedback.length}`, type: feedbackType, rating, comment: feedbackComment.trim(), destination: currentHotel.opsEmail };
+    const comment = feedbackComment.trim();
+    const needsResponse = rating <= 3 || /\?|concern|issue|problem|call|contact/i.test(comment);
+    const item: Feedback = { id: `FB-${110 + feedback.length}`, type: feedbackType, rating, comment, destination: currentHotel.opsEmail, guestName: guest.name, guestEmail: receiptEmail || (guest.contact?.includes("@") ? guest.contact : ""), status: needsResponse ? "Needs response" : "New" };
     setFeedback((current) => [item, ...current]);
     demoChannel.current?.postMessage({ type: "feedback-created", feedback: item } satisfies DemoSyncEvent);
     setSheet(null); setRating(0); setFeedbackComment("");
@@ -672,11 +653,12 @@ export default function Prototype() {
 
   const renderProfile = () => <main className="screen-content profile-screen" data-testid="profile-screen">
     <header className="profile-hero"><span className="profile-avatar">{guest.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span><h1>{guest.name}</h1><p>{guest.hotel} · #{guest.reservation}</p></header>
-    <section className="profile-section"><span className="section-label">Stay & account</span><button onClick={() => setSheet("hotel")}><MagnifyingGlassIcon /><span><strong>Change participating hotel</strong><small>Search by hotel, city, region or pincode</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("checkout")}><FileTextIcon /><span><strong>Checkout & billing</strong><small>View, email or download both documents</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("notifications")}><BellIcon /><span><strong>Proactive notifications</strong><small>Push {pushEnabled ? "on" : "off"} · email {emailUpdates ? "on" : "off"}</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("feedback")}><HeartIcon /><span><strong>Share feedback</strong><small>Delivered to participating hotel operations</small></span><ChevronRightIcon /></button><button onClick={() => changeView("ops")} data-testid="open-ops"><DashboardIcon /><span><strong>Hotel operations console</strong><small>Track, action, close and export MIS</small></span><ChevronRightIcon /></button></section>
+    <section className="profile-section"><span className="section-label">Stay & account</span><button onClick={() => setSheet("hotel")}><MagnifyingGlassIcon /><span><strong>Change participating hotel</strong><small>Search by hotel, city, region or pincode</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("checkout")}><FileTextIcon /><span><strong>Checkout & billing</strong><small>View, email or download both documents</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("notifications")}><BellIcon /><span><strong>Proactive notifications</strong><small>Push {pushEnabled ? "on" : "off"} · email {emailUpdates ? "on" : "off"}</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("feedback")}><HeartIcon /><span><strong>Share feedback</strong><small>Delivered to participating hotel operations</small></span><ChevronRightIcon /></button></section>
     <section className="privacy-card"><CheckCircledIcon /><div><strong>Private demo mode</strong><p>No contacts, files, photos, location history, or device identifiers are read. Data resets on reload.</p></div></section>
     <button className="text-button" onClick={() => { setView("auth"); dismissKeyboard(); }}>Sign out of demo</button>
   </main>;
 
+  /* Legacy in-phone staff console removed from the customer experience.
   const renderOps = () => <main className="screen-content ops-screen" data-testid="ops-screen">
     <header className="ops-header"><button className="icon-button light-bg" aria-label="Close operations" onClick={() => changeView("profile")}><Cross2Icon /></button><div><span className="eyebrow">{guest.hotel}</span><h1>Operations</h1></div><button className="time-sim" onClick={() => setSimulatedMinutes((value) => value + 15)}>+15 min</button></header>
     <section className="ops-metrics"><span><strong>{tickets.filter((ticket) => ticket.status === "New").length}</strong> New</span><span><strong>{tickets.filter((ticket) => ticket.status === "In progress").length}</strong> Active</span><span><strong>{tickets.filter((ticket) => ticket.priority === "High" && ticket.status !== "Closed").length}</strong> High</span><span><strong>{feedback.length}</strong> Feedback</span></section>
@@ -689,6 +671,7 @@ export default function Prototype() {
       return <article key={ticket.id} className={`ops-ticket ${ticket.priority.toLowerCase()}`}><div className="ops-ticket-top"><span>{ticket.id}</span><span className={`status-pill ${statusClass(ticket.status)}`}>{ticket.status}</span></div><h2>{ticket.title}</h2><p>{ticket.detail}</p><div className="route-row"><span>{ticket.department}</span><span>{ticket.priority}</span><span>{effectiveMinutes}m open</span></div>{ticket.status === "New" && <div className="alert-strip"><BellIcon /> Reminder #{Math.max(1, Math.floor(effectiveMinutes / 15))} active until accepted</div>}{stalled && <div className="alert-strip danger"><ExclamationTriangleIcon /> In progress over 4 hours. Comment required.</div>}{ticket.comments.map((comment, index) => <blockquote key={index}>{comment}</blockquote>)}<div className="ops-actions">{ticket.status === "New" && <button onClick={() => updateTicket(ticket.id, "In progress")}>Accept</button>}{ticket.status === "In progress" && <button onClick={() => updateTicket(ticket.id, "Resolved")}>Resolve</button>}{ticket.status === "Resolved" && <button onClick={() => updateTicket(ticket.id, "Closed")}>Close</button>}</div><div className="ops-comment"><KeyboardInput value={selectedTicketId === ticket.id ? opsComment : ""} onFocus={() => setSelectedTicketId(ticket.id)} onChange={(event) => { setSelectedTicketId(ticket.id); setOpsComment(event.target.value); }} placeholder="Add internal update" /><button onClick={() => addOpsComment(ticket.id)} aria-label="Save internal update"><PaperPlaneIcon /></button></div></article>;
     })}</section>
   </main>;
+  */
 
   const sheetTitle = sheet === "review" ? "Your adjusted plan" : sheet === "service" ? servicePath[servicePath.length - 1]?.label ?? "How can we help?" : sheet === "ticket" ? selectedTicket?.title ?? "Request" : sheet === "feedback" ? "Share feedback" : sheet === "checkout" ? "Checkout & billing" : sheet === "credits" ? "AI credits" : sheet === "notifications" ? "Proactive notifications" : sheet === "hotel" ? "Change hotel" : "";
 
@@ -706,10 +689,10 @@ export default function Prototype() {
 
   if (view === "auth") return renderAuth();
 
-  return <div className="app-shell"><MobileScroll key={view} className={`app-screen ${view === "ops" ? "ops-scroll" : ""}`}>{view === "home" && renderHome()}{view === "concierge" && renderConcierge()}{view === "requests" && renderRequests()}{view === "profile" && renderProfile()}{view === "ops" && renderOps()}</MobileScroll>{view !== "ops" && <BottomNav view={view} onChange={changeView} unread={unreadNotices} />}{keyboard.visible && <button className="keyboard-done" style={{ bottom: keyboard.height + 8 }} onPointerDown={(event) => { event.preventDefault(); dismissKeyboard(); }} aria-label="Dismiss keyboard">Done</button>}<BottomSheet open={sheet !== null} onOpenChange={(open) => { if (!open) { setSheet(null); setSelectedService(null); setServicePath([]); } }} title={sheetTitle} description={sheet === "service" ? "Choose a service; Intellistay routes it to the right hotel team." : undefined}>{renderSheetContent()}</BottomSheet>{toast && <div className="toast" role="status"><CheckCircledIcon />{toast}</div>}</div>;
+  return <div className="app-shell"><MobileScroll key={view} className="app-screen">{view === "home" && renderHome()}{view === "concierge" && renderConcierge()}{view === "requests" && renderRequests()}{view === "profile" && renderProfile()}</MobileScroll><BottomNav view={view} onChange={changeView} unread={unreadNotices} />{keyboard.visible && <button className="keyboard-done" style={{ bottom: keyboard.height + 8 }} onPointerDown={(event) => { event.preventDefault(); dismissKeyboard(); }} aria-label="Dismiss keyboard">Done</button>}<BottomSheet open={sheet !== null} onOpenChange={(open) => { if (!open) { setSheet(null); setSelectedService(null); setServicePath([]); } }} title={sheetTitle} description={sheet === "service" ? "Choose a service; Intellistay routes it to the right hotel team." : undefined}>{renderSheetContent()}</BottomSheet>{toast && <div className="toast" role="status"><CheckCircledIcon />{toast}</div>}</div>;
 }
 
-export function WebOperationsDashboard() {
+function WebOperationsDashboardLegacy() {
   const [property, setProperty] = useState(hotels[0].name);
   const [tickets, setTickets] = useState<Ticket[]>(initialTickets);
   const [feedback, setFeedback] = useState<Feedback[]>([]);
@@ -813,5 +796,244 @@ export function WebOperationsDashboard() {
         </article>
       </section>
     </main>
+  </div>;
+}
+
+type OpsSection = "Overview" | "Requests" | "Performance" | "Feedback" | "Reports" | "AI analyst";
+type OperationsTicket = Ticket & {
+  property: string;
+  guestName: string;
+  guestEmail: string;
+  room: string;
+  queueMinutes: number;
+  resolutionMinutes?: number;
+  firstTimeResolved: boolean;
+  owner: string;
+  openedAt: string;
+};
+type OpsSession = { email: string; hotelName: string; role: string };
+
+const operationsSections: OpsSection[] = ["Overview", "Requests", "Performance", "Feedback", "Reports", "AI analyst"];
+const operationsStatuses: TicketStatus[] = ["New", "In progress", "Dead", "Resolved", "Closed", "N/A / Invalid"];
+
+function buildOperationsTickets(property: string): OperationsTicket[] {
+  return [
+    { ...initialTickets[1], property, guestName: "Maya Kapoor", guestEmail: "maya@example.com", room: "1208", queueMinutes: 7, firstTimeResolved: false, owner: "Unassigned", openedAt: "18:42" },
+    { ...initialTickets[0], property, guestName: "Maya Kapoor", guestEmail: "maya@example.com", room: "1208", queueMinutes: 4, firstTimeResolved: false, owner: "A. Fernandes", openedAt: "14:12" },
+    { ...initialTickets[2], property, guestName: "Kabir Rao", guestEmail: "kabir@example.com", room: "704", queueMinutes: 6, resolutionMinutes: 18, firstTimeResolved: true, owner: "N. Shah", openedAt: "17:58" },
+    { id: "IST-2405", title: "Room cleaning", detail: "Evening refresh requested before 19:00.", department: "Housekeeping", status: "Closed", priority: "Standard", minutesOpen: 22, comments: ["Completed and guest confirmed."], property, guestName: "Anika Sen", guestEmail: "anika@example.com", room: "508", queueMinutes: 3, resolutionMinutes: 14, firstTimeResolved: true, owner: "P. Das", openedAt: "16:21" },
+    { id: "IST-2404", title: "Airport pickup", detail: "Driver missed original terminal meeting point.", department: "Concierge", status: "Dead", priority: "High", minutesOpen: 142, comments: ["SLA breached; duty manager reviewing."], property, guestName: "Dev Malhotra", guestEmail: "dev@example.com", room: "1102", queueMinutes: 38, firstTimeResolved: false, owner: "R. Pinto", openedAt: "15:36" },
+    { id: "IST-2403", title: "Duplicate minibar request", detail: "Duplicate of IST-2399; no operational action required.", department: "Front Desk", status: "N/A / Invalid", priority: "Standard", minutesOpen: 5, comments: ["Duplicate validated."], property, guestName: "Sara Iyer", guestEmail: "sara@example.com", room: "312", queueMinutes: 2, firstTimeResolved: false, owner: "N. Shah", openedAt: "15:12" },
+    { id: "IST-2402", title: "Restaurant table for two", detail: "Terrace table reserved for 20:00.", department: "Dining", status: "Resolved", priority: "Standard", minutesOpen: 19, comments: ["Confirmation sent."], property, guestName: "Maya Kapoor", guestEmail: "maya@example.com", room: "1208", queueMinutes: 5, resolutionMinutes: 12, firstTimeResolved: true, owner: "L. Mehta", openedAt: "13:08" },
+    { id: "IST-2401", title: "Extra bedding", detail: "Rollaway bed delivered to room 914.", department: "Housekeeping", status: "Closed", priority: "Standard", minutesOpen: 31, comments: ["Delivered in one visit."], property, guestName: "Vihaan Bose", guestEmail: "vihaan@example.com", room: "914", queueMinutes: 8, resolutionMinutes: 23, firstTimeResolved: true, owner: "P. Das", openedAt: "12:44" },
+    { id: "IST-2400", title: "Membership points review", detail: "Stay points are being validated against the loyalty account.", department: "Reservations", status: "In progress", priority: "Standard", minutesOpen: 46, comments: ["Loyalty ledger requested."], property, guestName: "Tara Khanna", guestEmail: "tara@example.com", room: "601", queueMinutes: 11, firstTimeResolved: false, owner: "S. Roy", openedAt: "12:18" },
+  ];
+}
+
+function buildOperationsFeedback(hotel: Hotel): Feedback[] {
+  return [
+    { id: "FB-113", type: "Room", rating: 2, comment: "The AC is better now, but can someone explain why it took so long?", destination: hotel.opsEmail, guestName: "Maya Kapoor", guestEmail: "maya@example.com", status: "Needs response" },
+    { id: "FB-112", type: "Concierge", rating: 5, comment: "Wheelchair assistance was waiting before we arrived. Excellent care.", destination: hotel.opsEmail, guestName: "Kabir Rao", guestEmail: "kabir@example.com", status: "New" },
+    { id: "FB-111", type: "Dining", rating: 4, comment: "Lovely dinner. Please share my thanks with the Terrace team.", destination: hotel.opsEmail, guestName: "Anika Sen", guestEmail: "anika@example.com", status: "Responded", response: "Thank you—your note has been shared with the Terrace team." },
+    { id: "FB-110", type: "Checkout", rating: 3, comment: "Could you email a clearer explanation of the spa line item?", destination: hotel.opsEmail, guestName: "Dev Malhotra", guestEmail: "dev@example.com", status: "Needs response" },
+  ];
+}
+
+function sectionIcon(section: OpsSection) {
+  if (section === "Overview") return <DashboardIcon />;
+  if (section === "Requests") return <ClipboardIcon />;
+  if (section === "Performance") return <ClockIcon />;
+  if (section === "Feedback") return <HeartIcon />;
+  if (section === "Reports") return <FileTextIcon />;
+  return <LightningBoltIcon />;
+}
+
+export function WebOperationsDashboard() {
+  const [session, setSession] = useState<OpsSession | null>(() => {
+    try { return JSON.parse(window.sessionStorage.getItem("intellistay-ops-session") || "null") as OpsSession | null; } catch { return null; }
+  });
+  const initialHotel = hotels.find((hotel) => hotel.name === session?.hotelName) ?? hotels[0];
+  const [tickets, setTickets] = useState<OperationsTicket[]>(() => buildOperationsTickets(initialHotel.name));
+  const [feedback, setFeedback] = useState<Feedback[]>(() => buildOperationsFeedback(initialHotel));
+  const [activeSection, setActiveSection] = useState<OpsSection>("Overview");
+  const [period, setPeriod] = useState<ReportPeriod>("Daily");
+  const [accessMode, setAccessMode] = useState<"email" | "partner">("email");
+  const [staffEmail, setStaffEmail] = useState("manager@auroragrand.demo");
+  const [partnerId, setPartnerId] = useState("AG-HOTEL-001");
+  const [accessCode, setAccessCode] = useState("INTELLI-DEMO");
+  const [partnerHotel, setPartnerHotel] = useState(hotels[0].name);
+  const [authError, setAuthError] = useState("");
+  const [requestFilter, setRequestFilter] = useState<"All" | TicketStatus>("All");
+  const [requestSearch, setRequestSearch] = useState("");
+  const [selectedFeedback, setSelectedFeedback] = useState("");
+  const [responseDraft, setResponseDraft] = useState("");
+  const [aiQuery, setAiQuery] = useState("");
+  const [aiAnswer, setAiAnswer] = useState("Ask for a property summary, a guest history, queue risks, feedback concerns, or a reporting breakdown.");
+  const [toast, setToast] = useState("");
+  const channelRef = useRef<BroadcastChannel | null>(null);
+
+  const hotel = hotels.find((item) => item.name === session?.hotelName) ?? initialHotel;
+  const showToast = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 3200); };
+
+  useEffect(() => {
+    if (!("BroadcastChannel" in window)) return;
+    const channel = new BroadcastChannel(demoChannelName);
+    channelRef.current = channel;
+    channel.onmessage = (event: MessageEvent<DemoSyncEvent>) => {
+      const update = event.data;
+      if (update.type === "ticket-created") {
+        const incoming: OperationsTicket = { ...update.ticket, property: hotel.name, guestName: "Maya Kapoor", guestEmail: "maya@example.com", room: "1208", queueMinutes: 0, firstTimeResolved: false, owner: "Unassigned", openedAt: "Just now" };
+        setTickets((all) => [incoming, ...all.filter((ticket) => ticket.id !== incoming.id)]);
+        showToast(`${incoming.id} arrived from the guest app.`);
+      }
+      if (update.type === "ticket-status") setTickets((all) => all.map((ticket) => ticket.id === update.id ? { ...ticket, status: update.status } : ticket));
+      if (update.type === "feedback-created") setFeedback((all) => [{ ...update.feedback, guestName: update.feedback.guestName || "Maya Kapoor", guestEmail: update.feedback.guestEmail || "maya@example.com" }, ...all]);
+    };
+    return () => { channelRef.current = null; channel.close(); };
+  }, [hotel.name]);
+
+  useEffect(() => {
+    document.querySelector<HTMLElement>(".web-ops-surface")?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [activeSection]);
+
+  const completeLogin = (nextHotel: Hotel, email: string, role: string) => {
+    const nextSession = { email, hotelName: nextHotel.name, role };
+    setSession(nextSession);
+    window.sessionStorage.setItem("intellistay-ops-session", JSON.stringify(nextSession));
+    setTickets(buildOperationsTickets(nextHotel.name));
+    setFeedback(buildOperationsFeedback(nextHotel));
+    setAuthError("");
+  };
+
+  const authenticate = () => {
+    if (accessMode === "email") {
+      const domain = staffEmail.trim().toLowerCase().split("@")[1];
+      const matchedHotel = hotels.find((item) => item.opsEmail.split("@")[1] === domain);
+      if (!matchedHotel) return setAuthError("This email domain is not associated with a participating Intellistay hotel.");
+      completeLogin(matchedHotel, staffEmail.trim(), "Hotel operations manager");
+      return;
+    }
+    const matchedHotel = hotels.find((item) => item.name === partnerHotel);
+    if (!matchedHotel || partnerId.trim().length < 4 || accessCode !== "INTELLI-DEMO") return setAuthError("Partner ID or access code could not be verified.");
+    completeLogin(matchedHotel, `${partnerId.trim()}@partner.intellistay.demo`, "Partner operations lead");
+  };
+
+  const signOut = () => {
+    window.sessionStorage.removeItem("intellistay-ops-session");
+    setSession(null);
+    setActiveSection("Overview");
+  };
+
+  const changeStatus = (id: string, status: TicketStatus) => {
+    setTickets((all) => all.map((ticket) => ticket.id === id ? { ...ticket, status, owner: ticket.owner === "Unassigned" ? "M. Kapoor" : ticket.owner, resolutionMinutes: status === "Resolved" || status === "Closed" ? ticket.resolutionMinutes ?? ticket.minutesOpen : ticket.resolutionMinutes, firstTimeResolved: status === "Resolved" ? ticket.comments.length <= 1 : ticket.firstTimeResolved } : ticket));
+    channelRef.current?.postMessage({ type: "ticket-status", id, status } satisfies DemoSyncEvent);
+    showToast(`${id} moved to ${status}. The guest view is synchronized.`);
+  };
+
+  const raised = tickets.length;
+  const inProgress = tickets.filter((ticket) => ticket.status === "In progress").length;
+  const dead = tickets.filter((ticket) => ticket.status === "Dead").length;
+  const resolved = tickets.filter((ticket) => ticket.status === "Resolved").length;
+  const closed = tickets.filter((ticket) => ticket.status === "Closed").length;
+  const invalid = tickets.filter((ticket) => ticket.status === "N/A / Invalid").length;
+  const completed = tickets.filter((ticket) => ticket.status === "Resolved" || ticket.status === "Closed");
+  const ftr = completed.filter((ticket) => ticket.firstTimeResolved).length;
+  const ftrRate = completed.length ? Math.round(ftr / completed.length * 100) : 0;
+  const resolutionTimes = tickets.flatMap((ticket) => ticket.resolutionMinutes ? [ticket.resolutionMinutes] : []);
+  const fastest = resolutionTimes.length ? Math.min(...resolutionTimes) : 0;
+  const averageQueue = tickets.length ? Math.round(tickets.reduce((sum, ticket) => sum + ticket.queueMinutes, 0) / tickets.length) : 0;
+  const feedbackNeedsResponse = feedback.filter((item) => item.status === "Needs response").length;
+  const guestSentiment = feedback.length ? (feedback.reduce((sum, item) => sum + item.rating, 0) / feedback.length).toFixed(1) : "—";
+  const filteredTickets = tickets.filter((ticket) => (requestFilter === "All" || ticket.status === requestFilter) && (!requestSearch.trim() || `${ticket.id} ${ticket.title} ${ticket.guestName} ${ticket.room} ${ticket.department}`.toLowerCase().includes(requestSearch.trim().toLowerCase())));
+  const departmentStats = (["Front Desk", "Concierge", "Maintenance", "Housekeeping", "Dining", "Reservations"] as Department[]).map((department) => ({ department, count: tickets.filter((ticket) => ticket.department === department).length, active: tickets.filter((ticket) => ticket.department === department && (ticket.status === "New" || ticket.status === "In progress" || ticket.status === "Dead")).length }));
+  const metrics = [
+    { label: "Requests raised", value: raised, note: `${period} property total` },
+    { label: "In progress", value: inProgress, note: "Actively owned" },
+    { label: "Dead / breached", value: dead, note: "Needs recovery", alert: true },
+    { label: "Resolved", value: resolved, note: "Awaiting closure" },
+    { label: "Closed", value: closed, note: "Guest loop complete" },
+    { label: "N/A or invalid", value: invalid, note: "Excluded with reason" },
+    { label: "First-time resolved", value: `${ftrRate}%`, note: `${ftr} of ${completed.length} completed` },
+    { label: "Fastest resolution", value: `${fastest}m`, note: "Best completed request" },
+    { label: "Average queue wait", value: `${averageQueue}m`, note: "Before team acceptance" },
+  ];
+
+  const exportWebReport = () => {
+    const rows = ["Ticket,Guest,Room,Service,Department,Status,Priority,Queue Minutes,Resolution Minutes,FTR,Owner", ...tickets.map((ticket) => [ticket.id, `"${ticket.guestName}"`, ticket.room, `"${ticket.title}"`, ticket.department, ticket.status, ticket.priority, ticket.queueMinutes, ticket.resolutionMinutes ?? "", ticket.firstTimeResolved ? "Yes" : "No", `"${ticket.owner}"`].join(",")), "", "Feedback,Guest,Rating,Type,Status,Comment,Response", ...feedback.map((item) => [item.id, `"${item.guestName || "Guest"}"`, item.rating, item.type, item.status || "New", `"${item.comment.replace(/"/g, "'")}"`, `"${(item.response || "").replace(/"/g, "'")}"`].join(","))];
+    const url = URL.createObjectURL(new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `Intellistay-${hotel.name.replace(/\s+/g, "-")}-${period}-MIS.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    showToast(`${period} report downloaded.`);
+  };
+
+  const emailWebReport = () => showToast(`${period} management report queued to ${hotel.opsEmail}.`);
+
+  const sendFeedbackResponse = (item: Feedback) => {
+    if (!responseDraft.trim()) return showToast("Write a response before sending.");
+    const recipient = item.guestEmail || "guest email on reservation";
+    setFeedback((all) => all.map((entry) => entry.id === item.id ? { ...entry, response: responseDraft.trim(), status: "Responded" } : entry));
+    channelRef.current?.postMessage({ type: "feedback-response", feedbackId: item.id, response: responseDraft.trim(), recipient } satisfies DemoSyncEvent);
+    setSelectedFeedback("");
+    setResponseDraft("");
+    showToast(`Response sent to ${recipient} and added to the guest notification center.`);
+  };
+
+  const runAiAnalysis = (prompt = aiQuery) => {
+    const query = prompt.trim().toLowerCase();
+    if (!query) return;
+    setAiQuery(prompt);
+    if (/maya|customer|guest/.test(query)) {
+      const guestTickets = tickets.filter((ticket) => ticket.guestName.toLowerCase().includes("maya"));
+      setAiAnswer(`Maya Kapoor has ${guestTickets.length} requests: ${guestTickets.map((ticket) => `${ticket.title} (${ticket.status})`).join(", ")}. Her AC request is the current recovery risk and her latest feedback needs a response.`);
+    } else if (/feedback|concern|question|sentiment/.test(query)) {
+      setAiAnswer(`${feedbackNeedsResponse} feedback items need a response. The main concern is response-time clarity after maintenance. Recommended action: acknowledge Maya today and explain the dispatch timeline.`);
+    } else if (/queue|wait|slow|dead|breach/.test(query)) {
+      setAiAnswer(`Average queue wait is ${averageQueue} minutes. Concierge owns the only dead request, an airport pickup open for 142 minutes. Reassign it to the duty manager and contact the guest now.`);
+    } else if (/ftr|first|resolve|performance/.test(query)) {
+      setAiAnswer(`First-time resolution is ${ftrRate}% (${ftr} of ${completed.length} completed requests). Housekeeping leads with two one-visit completions; Concierge needs recovery coaching.`);
+    } else if (/report|summary|today|overview/.test(query)) {
+      setAiAnswer(`${hotel.name} has ${raised} requests, ${inProgress} in progress, ${dead} dead, ${resolved} resolved, and ${closed} closed. Guest sentiment is ${guestSentiment}/5. I recommend clearing the dead airport transfer and responding to ${feedbackNeedsResponse} feedback items first.`);
+    } else {
+      setAiAnswer(`I searched this property's requests and feedback but need a hotel-operations question. Try “show queue risks”, “summarize Maya Kapoor”, “review FTR”, or “what feedback needs a response?”`);
+    }
+  };
+
+  if (!session) return <div className="ops-auth-surface">
+    <aside className="ops-auth-story"><AppMark /><div><span className="eyebrow">Intellistay for hotel partners</span><h1>Turn every guest signal into a decisive next action.</h1><p>A private operations workspace for participating properties—connected to the guest concierge, never exposed inside it.</p></div><div className="ops-auth-proof"><span><CheckCircledIcon /> Property-scoped access</span><span><CheckCircledIcon /> Guest-to-team live routing</span><span><CheckCircledIcon /> Auditable AI recommendations</span></div></aside>
+    <main className="ops-auth-main"><section className="ops-auth-card"><span className="section-label">Authorized partner workspace</span><h2>Hotel operations sign in</h2><p>We identify your participating property from its approved email domain or partnership login.</p><div className="ops-access-tabs" role="tablist" aria-label="Hotel operations access method"><button role="tab" aria-selected={accessMode === "email"} className={accessMode === "email" ? "active" : ""} onClick={() => { setAccessMode("email"); setAuthError(""); }}>Hotel email</button><button role="tab" aria-selected={accessMode === "partner"} className={accessMode === "partner" ? "active" : ""} onClick={() => { setAccessMode("partner"); setAuthError(""); }}>Partner login</button></div>{accessMode === "email" ? <label className="ops-auth-field"><span>Work email</span><input value={staffEmail} onChange={(event) => setStaffEmail(event.target.value)} type="email" aria-label="Hotel work email" /><small>Demo: manager@auroragrand.demo</small></label> : <><label className="ops-auth-field"><span>Participating hotel</span><select value={partnerHotel} onChange={(event) => setPartnerHotel(event.target.value)}>{hotels.map((item) => <option key={item.name}>{item.name}</option>)}</select></label><div className="ops-auth-two"><label className="ops-auth-field"><span>Partner ID</span><input value={partnerId} onChange={(event) => setPartnerId(event.target.value)} /></label><label className="ops-auth-field"><span>Access code</span><input value={accessCode} onChange={(event) => setAccessCode(event.target.value)} type="password" /><small>Demo: INTELLI-DEMO</small></label></div></>}{authError && <p className="ops-auth-error" role="alert"><ExclamationTriangleIcon />{authError}</p>}<button className="ops-auth-submit" onClick={authenticate}>Enter operations workspace <ChevronRightIcon /></button><p className="ops-auth-privacy"><CheckCircledIcon /> Demo verification only. Production access requires SSO, MFA, property roles, and server-enforced data isolation.</p></section></main>
+  </div>;
+
+  const statusVisual = operationsStatuses.map((status) => ({ status, count: tickets.filter((ticket) => ticket.status === status).length }));
+  const maxStatusCount = Math.max(1, ...statusVisual.map((item) => item.count));
+  const pageCopy: Record<OpsSection, { eyebrow: string; title: string; description: string }> = {
+    Overview: { eyebrow: "Live property pulse", title: "Operations overview", description: "Every guest request, SLA risk, recovery action, and feedback signal in one decision-ready view." },
+    Requests: { eyebrow: "Service command center", title: "Requests workboard", description: "Search, own, progress, resolve, close, or invalidate requests with the guest view synchronized." },
+    Performance: { eyebrow: "Service intelligence", title: "Performance dashboard", description: "Track resolution quality, queue speed, department workload, and first-time resolution." },
+    Feedback: { eyebrow: "Voice of the guest", title: "Feedback action center", description: "Find concerns and questions, respond personally, and close the loop by email and in-app notification." },
+    Reports: { eyebrow: "Management information", title: "Reports & MIS", description: "Review and distribute daily, weekly, monthly, or quarterly operational reporting." },
+    "AI analyst": { eyebrow: "Property-aware intelligence", title: "Ask Intellistay operations", description: "Query this hotel's requests, guests, feedback, risks, and performance in plain language." },
+  };
+  const copy = pageCopy[activeSection];
+
+  return <div className="web-ops-surface ops-v2">
+    <aside className="web-sidebar ops-sidebar"><AppMark /><div className="ops-property-lock"><span className="hotel-monogram">{hotel.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span><div><small>Authorized property</small><strong>{hotel.name}</strong><span>{hotel.city}, {hotel.country}</span></div><CheckCircledIcon /></div><nav aria-label="Hotel operations navigation">{operationsSections.map((section) => <button key={section} className={activeSection === section ? "active" : ""} aria-current={activeSection === section ? "page" : undefined} onClick={() => setActiveSection(section)}>{sectionIcon(section)}{section}{section === "Requests" && <span>{inProgress + dead}</span>}{section === "Feedback" && feedbackNeedsResponse > 0 && <span>{feedbackNeedsResponse}</span>}</button>)}</nav><div className="web-system-card"><span className="live-dot" /><div><strong>Guest integration live</strong><small>Property-scoped routing and policy controls active</small></div></div><div className="ops-staff-card"><span>{session.email.split("@")[0].slice(0, 2).toUpperCase()}</span><div><strong>{session.role}</strong><small>{session.email}</small></div><button onClick={signOut}>Sign out</button></div></aside>
+
+    <main className="web-main ops-main"><header className="web-topbar ops-topbar"><div><span className="eyebrow">{copy.eyebrow}</span><h1>{copy.title}</h1><p>{copy.description}</p></div><div className="ops-top-actions"><button className="ops-action-secondary" onClick={emailWebReport}><EnvelopeClosedIcon /> Email report</button><button className="ops-action-primary" onClick={exportWebReport}><DownloadIcon /> Download</button><button className="ops-icon-button" aria-label="Operations notifications"><BellIcon /><i /></button></div></header>
+
+      {activeSection === "Overview" && <><section className="ops-metric-grid" aria-label="Hotel operations metrics">{metrics.map((metric) => <article key={metric.label} className={metric.alert ? "alert" : ""}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.note}</small></article>)}</section><section className="ops-overview-grid"><article className="web-panel ops-status-panel"><div className="web-panel-head"><div><span className="section-label">Request lifecycle</span><h2>Status distribution</h2></div><span className="ops-live-badge"><span className="live-dot" /> Live</span></div><div className="ops-bars" aria-label="Request status distribution">{statusVisual.map((item) => <div key={item.status}><span>{item.status}</span><div><i style={{ width: `${Math.max(7, item.count / maxStatusCount * 100)}%` }} className={`bar-${statusClass(item.status)}`} /></div><strong>{item.count}</strong></div>)}</div></article><article className="web-panel ops-attention-panel"><div className="web-panel-head"><div><span className="section-label">Decision queue</span><h2>Needs attention</h2></div><span>{dead + feedbackNeedsResponse + tickets.filter((ticket) => ticket.status === "New").length}</span></div><button onClick={() => { setRequestFilter("Dead"); setActiveSection("Requests"); }}><ExclamationTriangleIcon /><span><strong>Dead request recovery</strong><small>{dead} request has breached its service window</small></span><ChevronRightIcon /></button><button onClick={() => setActiveSection("Feedback")}><HeartIcon /><span><strong>Guest follow-up</strong><small>{feedbackNeedsResponse} feedback items contain a concern or question</small></span><ChevronRightIcon /></button><button onClick={() => { setRequestFilter("New"); setActiveSection("Requests"); }}><ClockIcon /><span><strong>Unaccepted requests</strong><small>{tickets.filter((ticket) => ticket.status === "New").length} waiting for an owner</small></span><ChevronRightIcon /></button></article></section><section className="web-panel ops-compact-queue"><div className="web-panel-head"><div><span className="section-label">Priority workboard</span><h2>What teams should handle next</h2></div><button onClick={() => setActiveSection("Requests")}>View all requests <ChevronRightIcon /></button></div><div className="ops-request-table" role="table" aria-label="Priority requests"><div className="ops-request-head" role="row"><span>Request & guest</span><span>Team</span><span>Queue</span><span>Status</span><span>Owner</span><span>Next action</span></div>{tickets.filter((ticket) => ticket.status === "New" || ticket.status === "In progress" || ticket.status === "Dead").slice(0, 5).map((ticket) => <div className="ops-request-row" role="row" key={ticket.id}><span><strong>{ticket.title}</strong><small>{ticket.id} · {ticket.guestName} · Room {ticket.room}</small></span><span>{ticket.department}</span><span>{ticket.queueMinutes}m</span><span><i className={`status-pill ${statusClass(ticket.status)}`}>{ticket.status}</i></span><span>{ticket.owner}</span><span>{ticket.status === "New" ? <button onClick={() => changeStatus(ticket.id, "In progress")}>Accept</button> : ticket.status === "In progress" ? <button onClick={() => changeStatus(ticket.id, "Resolved")}>Resolve</button> : <button onClick={() => changeStatus(ticket.id, "In progress")}>Recover</button>}</span></div>)}</div></section></>}
+
+      {activeSection === "Requests" && <section className="web-panel ops-workboard"><div className="ops-toolbar"><label><MagnifyingGlassIcon /><input value={requestSearch} onChange={(event) => setRequestSearch(event.target.value)} placeholder="Search request, guest, room or team" aria-label="Search hotel requests" /></label><div className="ops-filter-chips">{(["All", ...operationsStatuses] as const).map((status) => <button key={status} className={requestFilter === status ? "active" : ""} onClick={() => setRequestFilter(status)}>{status}</button>)}</div></div><div className="ops-request-table detailed" role="table" aria-label="All hotel requests"><div className="ops-request-head" role="row"><span>Request & guest</span><span>Team</span><span>Priority</span><span>Queue</span><span>Status</span><span>Owner</span><span>Actions</span></div>{filteredTickets.map((ticket) => <div className="ops-request-row" role="row" key={ticket.id}><span><strong>{ticket.title}</strong><small>{ticket.id} · {ticket.guestName} · Room {ticket.room}</small></span><span>{ticket.department}</span><span className={ticket.priority === "High" ? "ops-high" : ""}>{ticket.priority}</span><span>{ticket.queueMinutes}m</span><span><i className={`status-pill ${statusClass(ticket.status)}`}>{ticket.status}</i></span><span>{ticket.owner}</span><span className="ops-row-actions">{ticket.status === "New" && <button onClick={() => changeStatus(ticket.id, "In progress")}>Accept</button>}{(ticket.status === "In progress" || ticket.status === "Dead") && <button onClick={() => changeStatus(ticket.id, "Resolved")}>Resolve</button>}{ticket.status === "Resolved" && <button onClick={() => changeStatus(ticket.id, "Closed")}>Close</button>}{ticket.status !== "Closed" && ticket.status !== "N/A / Invalid" && <button className="subtle" onClick={() => changeStatus(ticket.id, "N/A / Invalid")}>Invalid</button>}</span></div>)}</div>{!filteredTickets.length && <div className="ops-empty"><CheckCircledIcon /><strong>No requests match this view.</strong><span>Change the status filter or search term.</span></div>}</section>}
+
+      {activeSection === "Performance" && <><section className="ops-performance-hero"><article><span>First-time resolution</span><strong>{ftrRate}%</strong><p>{ftr} requests completed without a repeat visit or reopen.</p></article><article><span>Fastest resolution</span><strong>{fastest}m</strong><p>{tickets.find((ticket) => ticket.resolutionMinutes === fastest)?.title} set today's benchmark.</p></article><article><span>Average queue wait</span><strong>{averageQueue}m</strong><p>From guest submission until an operations owner accepts.</p></article><article><span>Guest sentiment</span><strong>{guestSentiment}</strong><p>{feedbackNeedsResponse} feedback items still require a response.</p></article></section><section className="ops-performance-grid"><article className="web-panel"><span className="section-label">Department load</span><h2>Requests and active work</h2><div className="ops-department-list">{departmentStats.map((item) => <div key={item.department}><span><strong>{item.department}</strong><small>{item.active} active of {item.count} raised</small></span><div><i style={{ width: `${Math.max(8, item.count / Math.max(1, ...departmentStats.map((row) => row.count)) * 100)}%` }} /></div><strong>{item.count}</strong></div>)}</div></article><article className="web-panel"><span className="section-label">AI performance brief</span><h2>Where to improve next</h2><div className="ops-insight-list"><div><ExclamationTriangleIcon /><span><strong>Recover Concierge SLA</strong><small>The airport transfer is the only dead request and drives today's longest queue.</small></span></div><div><HeartIcon /><span><strong>Close the communication gap</strong><small>Two guests asked for explanations. Replying today protects sentiment.</small></span></div><div><CheckCircledIcon /><span><strong>Reuse Housekeeping playbook</strong><small>Housekeeping leads first-time resolution with one-visit completions.</small></span></div></div><button className="ops-action-primary full" onClick={() => { setAiQuery("Summarize performance and recommended actions"); runAiAnalysis("Summarize performance and recommended actions"); setActiveSection("AI analyst"); }}>Ask AI for an action plan</button></article></section></>}
+
+      {activeSection === "Feedback" && <section className="ops-feedback-layout"><div className="ops-feedback-list"><div className="ops-feedback-summary"><article><span>Average rating</span><strong>{guestSentiment}</strong><small>Across {feedback.length} responses</small></article><article className="alert"><span>Needs response</span><strong>{feedbackNeedsResponse}</strong><small>Questions or concerns detected</small></article><article><span>Responded</span><strong>{feedback.filter((item) => item.status === "Responded").length}</strong><small>Guest loop acknowledged</small></article></div>{feedback.map((item) => <article className={`ops-feedback-card ${selectedFeedback === item.id ? "selected" : ""}`} key={item.id}><div className="ops-feedback-card-head"><div><span className="ops-stars" aria-label={`${item.rating} out of 5 stars`}>{[1,2,3,4,5].map((star) => <StarIcon key={star} className={star <= item.rating ? "filled" : ""} />)}</span><strong>{item.type}</strong></div><span className={`feedback-state ${item.status === "Needs response" ? "needs" : ""}`}>{item.status || "New"}</span></div><blockquote>{item.comment || "No written comment."}</blockquote><div className="ops-feedback-meta"><span><PersonIcon />{item.guestName}</span><span><EnvelopeClosedIcon />{item.guestEmail || "Reservation email"}</span><span>{item.id}</span></div>{item.response && <div className="ops-response-sent"><CheckCircledIcon /><span><strong>Hotel response</strong><p>{item.response}</p></span></div>}<button className="ops-respond" onClick={() => { setSelectedFeedback(item.id); setResponseDraft(item.response || ""); }}>{item.response ? "Update response" : "Respond to guest"} <ChevronRightIcon /></button></article>)}</div><aside className="web-panel ops-response-panel">{selectedFeedback ? (() => { const item = feedback.find((entry) => entry.id === selectedFeedback)!; return <><span className="section-label">Direct guest response</span><h2>Reply to {item.guestName}</h2><p>Your response is delivered to {item.guestEmail || "the email on the reservation"} and appears in the guest notification center.</p><label><span>Response</span><textarea value={responseDraft} onChange={(event) => setResponseDraft(event.target.value)} rows={8} placeholder="Acknowledge the concern, explain the action, and offer a next step." /></label><div className="ops-response-actions"><button className="ops-action-primary" onClick={() => sendFeedbackResponse(item)}><EnvelopeClosedIcon /> Send response</button><button className="ops-action-secondary" onClick={() => { setSelectedFeedback(""); setResponseDraft(""); }}>Cancel</button></div><small>Production delivery requires the hotel's approved transactional email service.</small></>; })() : <div className="ops-response-empty"><HeartIcon /><h2>Select feedback to respond</h2><p>Questions and low ratings are automatically highlighted for hotel follow-up.</p></div>}</aside></section>}
+
+      {activeSection === "Reports" && <><section className="ops-report-hero web-panel"><div><span className="section-label">Reporting window</span><h2>{period} management information system</h2><p>A decision-ready property report covering volume, lifecycle, service speed, quality, and guest voice.</p></div><div className="web-report-tabs">{reportPeriods.map((item) => <button key={item} className={period === item ? "active" : ""} onClick={() => setPeriod(item)}>{item}</button>)}</div><div className="ops-report-actions"><button className="ops-action-secondary" onClick={emailWebReport}><EnvelopeClosedIcon /> Email to leadership</button><button className="ops-action-primary" onClick={exportWebReport}><DownloadIcon /> Download CSV</button></div></section><section className="ops-report-grid"><article className="web-panel"><span className="section-label">Executive summary</span><h2>{hotel.name} at a glance</h2><dl><div><dt>Request volume</dt><dd>{raised}</dd></div><div><dt>Active workload</dt><dd>{inProgress + tickets.filter((ticket) => ticket.status === "New").length}</dd></div><div><dt>SLA breach rate</dt><dd>{Math.round(dead / raised * 100)}%</dd></div><div><dt>FTR</dt><dd>{ftrRate}%</dd></div><div><dt>Average wait</dt><dd>{averageQueue}m</dd></div><div><dt>Guest sentiment</dt><dd>{guestSentiment}/5</dd></div></dl></article><article className="web-panel"><span className="section-label">Lifecycle mix</span><h2>Operational outcomes</h2><div className="ops-bars compact">{statusVisual.map((item) => <div key={item.status}><span>{item.status}</span><div><i style={{ width: `${Math.max(7, item.count / maxStatusCount * 100)}%` }} className={`bar-${statusClass(item.status)}`} /></div><strong>{item.count}</strong></div>)}</div></article><article className="web-panel ops-report-notes"><span className="section-label">Leadership notes</span><h2>AI-prepared talking points</h2><ul><li>Housekeeping sets the strongest first-time-resolution benchmark.</li><li>One dead Concierge request needs service recovery and review.</li><li>{feedbackNeedsResponse} guest feedback items need an owner and direct response.</li><li>Average queue wait is {averageQueue} minutes; target the longest handoff first.</li></ul></article></section></>}
+
+      {activeSection === "AI analyst" && <section className="ops-ai-layout"><article className="web-panel ops-ai-chat"><div className="ops-ai-intro"><span><LightningBoltIcon /></span><div><small>Property-aware operations AI</small><h2>Ask about {hotel.name}</h2><p>Answers are grounded in this hotel's requests, guests, feedback, and service metrics.</p></div></div><div className="ops-ai-answer"><span className="ai-avatar"><LightningBoltIcon /></span><p>{aiAnswer}</p></div><div className="ops-ai-prompts">{["Summarize today", "Show queue risks", "Review FTR", "What feedback needs a response?", "Summarize Maya Kapoor"].map((prompt) => <button key={prompt} onClick={() => runAiAnalysis(prompt)}>{prompt}</button>)}</div><div className="ops-ai-composer"><input value={aiQuery} onChange={(event) => setAiQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") runAiAnalysis(); }} placeholder="Ask for a guest, report, risk, or performance detail" aria-label="Ask Intellistay operations AI" /><button onClick={() => runAiAnalysis()}><PaperPlaneIcon /> Analyze</button></div></article><aside className="web-panel ops-ai-boundary"><span className="section-label">Safe operations boundary</span><h2>What the AI can do</h2><div className="web-control-list"><div><CheckCircledIcon /><span><strong>Analyze hotel data</strong><small>Requests, feedback, queues, and guest context for this property</small></span><em>Active</em></div><div><CheckCircledIcon /><span><strong>Prepare reports</strong><small>Summaries and exports remain visible to the signed-in hotel team</small></span><em>Active</em></div><div><CheckCircledIcon /><span><strong>Recommend actions</strong><small>Recovery, prioritization, staffing, and follow-up suggestions</small></span><em>Active</em></div><div><ClockIcon /><span><strong>External actions</strong><small>Email, compensation, dispatch, and cancellations require policy or approval</small></span><em className="pending">Gated</em></div></div></aside></section>}
+    </main>{toast && <div className="ops-toast" role="status"><CheckCircledIcon />{toast}</div>}
   </div>;
 }
