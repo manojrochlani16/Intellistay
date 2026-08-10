@@ -8,6 +8,9 @@
 - Keep the app-specific palette grounded in moss, forest, sage, eucalyptus, warm sand, parchment, charcoal, and a restrained clay accent.
 - The guest mobile experience remains primary; staff operations are a secondary judge/demo surface.
 - Do not put hotel-selection lists on the signed-in home screen. Hotel search belongs only in guest onboarding.
+- Follow-up product decision (2026-08-10): signed-in guests must be able to switch among participating Intellistay hotels. Keep the home uncluttered; expose the searchable participating-hotel selector from the current-hotel control and Profile rather than rendering a hotel list inline on Home.
+- Follow-up product decision (2026-08-10): every concierge service drill-down needs an explicit Cancel action, credits must open an explainable balance/usage surface, and proactive prompts must be visible through an in-app notification center and unobtrusive unread dots.
+- Follow-up product decision (2026-08-10): the staff Operations demo must support actioning through Closed, show guest feedback routing, and export daily, weekly, monthly, and quarterly MIS reports.
 
 In ChatGPT Work Mode, run `sites-preview start "$PWD"`, open `http://terminal.local:4173/` in the cloud browser, and verify the rendered app and its primary interactions. Keep that preview open and tell the user to inspect it in the cloud browser; do not present the local URL as a user-facing chat link. In Codex Desktop, run the local server yourself, open the preview in the in-app browser, and provide the clickable local URL. Do not deploy to Sites unless the user explicitly asks to share, publish, or deploy. Do not give the user server-start instructions when you can run it.
 
