@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "@fontsource/cormorant-garamond/600.css";
 import "@fontsource/inter/400.css";
 import "@fontsource/inter/500.css";
@@ -90,6 +90,11 @@ type Notice = {
   body: string;
   read: boolean;
 };
+
+type DemoSyncEvent =
+  | { type: "ticket-created"; ticket: Ticket }
+  | { type: "ticket-status"; id: string; status: TicketStatus }
+  | { type: "feedback-created"; feedback: Feedback };
 
 type View = "auth" | "home" | "concierge" | "requests" | "profile" | "ops";
 type Sheet = "review" | "service" | "ticket" | "feedback" | "checkout" | "credits" | "notifications" | "hotel" | null;
@@ -209,6 +214,7 @@ const initialTickets: Ticket[] = [
 
 const reportPeriods = ["Daily", "Weekly", "Monthly", "Quarterly"] as const;
 type ReportPeriod = typeof reportPeriods[number];
+const demoChannelName = "intellistay-live-demo";
 
 function statusClass(status: TicketStatus) {
   return status.toLowerCase().replace(" ", "-");
@@ -290,6 +296,7 @@ export default function Prototype() {
     { id: 1, title: "Transfer adjusted", body: "Your driver now expects you at 19:30.", read: false },
     { id: 2, title: "Rain tomorrow", body: "An indoor spa cabana is available from 11:00.", read: false },
   ]);
+  const demoChannel = useRef<BroadcastChannel | null>(null);
 
   const firstName = guest.name.split(" ")[0] || "Guest";
   const currentHotel = hotels.find((hotel) => hotel.name === guest.hotel) ?? hotels[0];
@@ -316,6 +323,39 @@ export default function Prototype() {
     const scroller = document.querySelector<HTMLElement>('[data-testid="mobile-scroll"]');
     if (scroller) scroller.scrollTop = 0;
   }, [view]);
+
+  useEffect(() => {
+    if (!("BroadcastChannel" in window)) return;
+    const channel = new BroadcastChannel(demoChannelName);
+    demoChannel.current = channel;
+    channel.onmessage = (event: MessageEvent<DemoSyncEvent>) => {
+      const update = event.data;
+      if (update.type === "ticket-status") {
+        setTickets((all) => all.map((ticket) => ticket.id === update.id ? { ...ticket, status: update.status } : ticket));
+        notify(`${update.id} updated by hotel operations: ${update.status}.`);
+      }
+    };
+    return () => {
+      demoChannel.current = null;
+      channel.close();
+    };
+  }, []);
+
+  useEffect(() => {
+    const dismissOnFocusLeave = () => window.requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (!(active instanceof HTMLInputElement) && !(active instanceof HTMLTextAreaElement)) keyboard.hide();
+    });
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") dismissKeyboard();
+    };
+    document.addEventListener("focusout", dismissOnFocusLeave);
+    document.addEventListener("keydown", dismissOnEscape);
+    return () => {
+      document.removeEventListener("focusout", dismissOnFocusLeave);
+      document.removeEventListener("keydown", dismissOnEscape);
+    };
+  });
 
   const dismissKeyboard = () => {
     keyboard.hide();
@@ -387,6 +427,7 @@ export default function Prototype() {
     const id = `IST-${2410 + tickets.length}`;
     const ticket: Ticket = { id, title, detail, department, status: "New", priority, minutesOpen: 0, comments: [] };
     setTickets((current) => [ticket, ...current]);
+    demoChannel.current?.postMessage({ type: "ticket-created", ticket } satisfies DemoSyncEvent);
     setSelectedTicketId(id);
     addNotice("Request received", `${id} is with ${department}. We’ll keep you updated here.`);
     notify(`${id} routed to ${department}.`);
@@ -407,6 +448,13 @@ export default function Prototype() {
 
   const localOrchestration = (prompt: string) => {
     const lower = prompt.toLowerCase();
+    const hospitalityIntent = /hotel|stay|room|ac|air conditioning|temperature|humidity|leak|clean|bathroom|bathtub|towel|sheet|bedding|minibar|mini bar|wheelchair|ramp|accessible|medical|stretcher|pregnan|elderly|service animal|pet|bassinet|language|restaurant|dinner|breakfast|lunch|table|bar|banquet|hall|cab|airport|transfer|flight|pickup|reservation|booking|loyalty|points|membership|checkout|invoice|itemized|bill|receipt|email|rain|weather|spa|cabana|nearby|local area|sightseeing|concierge|housekeeping|maintenance/.test(lower);
+    if (!hospitalityIntent) {
+      if (/capital\s+of\s+france/.test(lower)) {
+        return "Paris is the capital of France. That is a general-knowledge question, so I did not create a hotel ticket. I can also help with your stay, local travel, dining, accessibility, reservations, room comfort, or billing.";
+      }
+      return "That looks outside the hotel and travel services I can safely action, so I did not create a ticket. The live-AI connection can answer broader questions when enabled; this demo keeps autonomous actions limited to your stay.";
+    }
     if (/ac|air conditioning|temperature|humidity|leak/.test(lower)) {
       const issue = lower.includes("leak") ? "Leakage issue" : lower.includes("humid") ? "Humidity issue" : lower.includes("heat") ? "Heat issue" : "Temperature issue";
       const id = raiseTicket(`AC · ${issue}`, "Maintenance", `AI classified the room issue as ${issue.toLowerCase()} and routed Engineering to room ${guest.room ?? "the guest room"}.`, issue === "Leakage issue" ? "High" : "Standard");
@@ -463,7 +511,20 @@ export default function Prototype() {
     const endpoint = import.meta.env.VITE_CONCIERGE_API_URL;
     if (endpoint) {
       try {
-        const result = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: prompt, guest, tickets, interests, conversation: messages.slice(-6), availableServices: serviceCatalog.map((item) => item.label) }) });
+        const result = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          mode: "hotel_concierge",
+          message: prompt,
+          guest,
+          tickets,
+          interests,
+          conversation: messages.slice(-6),
+          availableServices: serviceCatalog.map((item) => item.label),
+          actionPolicy: {
+            allowed: ["suggest_service", "create_request_draft", "check_request_status", "open_billing_view"],
+            confirmationRequired: ["cancel_reservation", "charge_payment", "send_external_message", "dispatch_transport"],
+            prohibited: ["expose_private_data", "execute_unlisted_action"],
+          },
+        }) });
         if (result.ok) {
           const data = await result.json();
           if (typeof data.reply === "string") response = data.reply;
@@ -496,6 +557,7 @@ export default function Prototype() {
     const current = tickets.find((ticket) => ticket.id === id);
     if (current?.hoursInProgress && current.hoursInProgress >= 4 && status === "Resolved" && !current.comments.length) return notify("Add an internal update before resolving this 4-hour alert.");
     setTickets((all) => all.map((ticket) => ticket.id === id ? { ...ticket, status, hoursInProgress: status === "In progress" ? 0 : ticket.hoursInProgress } : ticket));
+    demoChannel.current?.postMessage({ type: "ticket-status", id, status } satisfies DemoSyncEvent);
     notify(`${id} moved to ${status}.`);
   };
 
@@ -547,6 +609,7 @@ export default function Prototype() {
     if (!rating) return notify("Choose a rating before submitting.");
     const item = { id: `FB-${110 + feedback.length}`, type: feedbackType, rating, comment: feedbackComment.trim(), destination: currentHotel.opsEmail };
     setFeedback((current) => [item, ...current]);
+    demoChannel.current?.postMessage({ type: "feedback-created", feedback: item } satisfies DemoSyncEvent);
     setSheet(null); setRating(0); setFeedbackComment("");
     notify(`Feedback delivered to ${currentHotel.opsEmail}.`);
   };
@@ -597,7 +660,7 @@ export default function Prototype() {
     </div>
     <section className="chat-thread" aria-live="polite">{messages.map((message, index) => <div key={`${message.from}-${index}`} className={`message ${message.from}`}>{message.from === "ai" && <span className="ai-avatar"><LightningBoltIcon /></span>}<p>{message.text}</p></div>)}{chatBusy && <div className="message ai"><span className="ai-avatar"><LightningBoltIcon /></span><p>Checking your stay context and hotel workflow…</p></div>}</section>
     <div className="chat-composer"><KeyboardInput value={chatInput} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void sendMessage(); }} placeholder="Ask me to book, change or resolve" aria-label="Ask Intellistay anything" /><button onClick={() => void sendMessage()} aria-label="Send message" disabled={chatBusy}><PaperPlaneIcon /></button></div>
-    <p className="ai-note">Context-aware hotel workflows · 2 credits per estimated token</p>
+    <p className="ai-note"><CheckCircledIcon /> Agent-ready boundary · hotel tools only · 2 credits per estimated token</p>
   </main>;
 
   const renderRequests = () => <main className="screen-content requests-screen" data-testid="requests-screen">
@@ -643,5 +706,112 @@ export default function Prototype() {
 
   if (view === "auth") return renderAuth();
 
-  return <div className="app-shell"><MobileScroll key={view} className={`app-screen ${view === "ops" ? "ops-scroll" : ""}`}>{view === "home" && renderHome()}{view === "concierge" && renderConcierge()}{view === "requests" && renderRequests()}{view === "profile" && renderProfile()}{view === "ops" && renderOps()}</MobileScroll>{view !== "ops" && <BottomNav view={view} onChange={changeView} unread={unreadNotices} />}<BottomSheet open={sheet !== null} onOpenChange={(open) => { if (!open) { setSheet(null); setSelectedService(null); setServicePath([]); } }} title={sheetTitle} description={sheet === "service" ? "Choose a service; Intellistay routes it to the right hotel team." : undefined}>{renderSheetContent()}</BottomSheet>{toast && <div className="toast" role="status"><CheckCircledIcon />{toast}</div>}</div>;
+  return <div className="app-shell"><MobileScroll key={view} className={`app-screen ${view === "ops" ? "ops-scroll" : ""}`}>{view === "home" && renderHome()}{view === "concierge" && renderConcierge()}{view === "requests" && renderRequests()}{view === "profile" && renderProfile()}{view === "ops" && renderOps()}</MobileScroll>{view !== "ops" && <BottomNav view={view} onChange={changeView} unread={unreadNotices} />}{keyboard.visible && <button className="keyboard-done" style={{ bottom: keyboard.height + 8 }} onPointerDown={(event) => { event.preventDefault(); dismissKeyboard(); }} aria-label="Dismiss keyboard">Done</button>}<BottomSheet open={sheet !== null} onOpenChange={(open) => { if (!open) { setSheet(null); setSelectedService(null); setServicePath([]); } }} title={sheetTitle} description={sheet === "service" ? "Choose a service; Intellistay routes it to the right hotel team." : undefined}>{renderSheetContent()}</BottomSheet>{toast && <div className="toast" role="status"><CheckCircledIcon />{toast}</div>}</div>;
+}
+
+export function WebOperationsDashboard() {
+  const [property, setProperty] = useState(hotels[0].name);
+  const [tickets, setTickets] = useState<Ticket[]>(initialTickets);
+  const [feedback, setFeedback] = useState<Feedback[]>([]);
+  const [period, setPeriod] = useState<ReportPeriod>("Daily");
+  const [activeSection, setActiveSection] = useState("Overview");
+  const [activity, setActivity] = useState([
+    "Flight AI-624 delay verified against arrival context",
+    "Airport transfer moved to 19:30 within hotel policy",
+    "Terrace reservation protected for 20:00",
+  ]);
+  const channelRef = useRef<BroadcastChannel | null>(null);
+
+  useEffect(() => {
+    if (!("BroadcastChannel" in window)) return;
+    const channel = new BroadcastChannel(demoChannelName);
+    channelRef.current = channel;
+    channel.onmessage = (event: MessageEvent<DemoSyncEvent>) => {
+      const update = event.data;
+      if (update.type === "ticket-created") {
+        setTickets((all) => [update.ticket, ...all.filter((ticket) => ticket.id !== update.ticket.id)]);
+        setActivity((all) => [`${update.ticket.id} routed to ${update.ticket.department} from the guest app`, ...all].slice(0, 6));
+      }
+      if (update.type === "ticket-status") setTickets((all) => all.map((ticket) => ticket.id === update.id ? { ...ticket, status: update.status } : ticket));
+      if (update.type === "feedback-created") setFeedback((all) => [update.feedback, ...all]);
+    };
+    return () => {
+      channelRef.current = null;
+      channel.close();
+    };
+  }, []);
+
+  const changeStatus = (id: string, status: TicketStatus) => {
+    setTickets((all) => all.map((ticket) => ticket.id === id ? { ...ticket, status } : ticket));
+    channelRef.current?.postMessage({ type: "ticket-status", id, status } satisfies DemoSyncEvent);
+    setActivity((all) => [`${id} moved to ${status} by hotel operations`, ...all].slice(0, 6));
+  };
+
+  const exportWebReport = () => {
+    const rows = ["Ticket,Service,Department,Status,Priority", ...tickets.map((ticket) => [ticket.id, `"${ticket.title}"`, ticket.department, ticket.status, ticket.priority].join(","))];
+    const url = URL.createObjectURL(new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `Intellistay-${period}-MIS.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const openTickets = tickets.filter((ticket) => ticket.status === "New" || ticket.status === "In progress");
+  const highPriority = openTickets.filter((ticket) => ticket.priority === "High").length;
+
+  return <div className="web-ops-surface">
+    <aside className="web-sidebar">
+      <AppMark />
+      <label className="web-property"><span>Participating property</span><select value={property} onChange={(event) => setProperty(event.target.value)}>{hotels.map((hotel) => <option key={hotel.name}>{hotel.name}</option>)}</select></label>
+      <nav aria-label="Operations website navigation">{["Overview", "Guest journeys", "Requests", "AI actions", "Reports"].map((item) => <button key={item} className={activeSection === item ? "active" : ""} onClick={() => setActiveSection(item)}>{item === "Overview" ? <DashboardIcon /> : item === "Requests" ? <ClipboardIcon /> : item === "Reports" ? <FileTextIcon /> : item === "AI actions" ? <LightningBoltIcon /> : <PersonIcon />}{item}{item === "Requests" && <span>{openTickets.length}</span>}</button>)}</nav>
+      <div className="web-system-card"><span className="live-dot" /><div><strong>Agent control plane live</strong><small>Actions restricted by hotel policy</small></div></div>
+      <a className="web-guest-link" href="?screen=home" target="_blank" rel="noreferrer"><HomeIcon /> Open guest mobile app <ChevronRightIcon /></a>
+      <small className="web-reset-note">Hackathon demo data resets on reload.</small>
+    </aside>
+
+    <main className="web-main">
+      <header className="web-topbar"><div><span className="eyebrow">{property}</span><h1>Operations command center</h1><p>Guest requests, proactive actions, SLA alerts, and management reporting in one live workspace.</p></div><div className="web-top-actions"><button aria-label="Operations notifications"><BellIcon /><i /></button><span>MK</span></div></header>
+
+      <section className="web-metrics" aria-label="Operations metrics">
+        <article><span>Open requests</span><strong>{openTickets.length}</strong><small>Across 5 departments</small></article>
+        <article><span>High priority</span><strong>{highPriority}</strong><small>Immediate attention</small></article>
+        <article><span>AI actions today</span><strong>18</strong><small>94% completed autonomously</small></article>
+        <article><span>Guest sentiment</span><strong>{feedback.length ? `${feedback[0].rating}.0` : "4.8"}</strong><small>Live feedback average</small></article>
+      </section>
+
+      <section className="web-command-grid">
+        <article className="web-panel web-agent-panel">
+          <div className="web-panel-head"><div><span className="section-label">Proactive AI activity</span><h2>Arrival plan orchestrated</h2></div><span className="web-safe-badge"><CheckCircledIcon /> Policy checked</span></div>
+          <p className="web-panel-intro">The agent linked flight context to transfer and dining tools, then stopped at the hotel-approved action boundary.</p>
+          <div className="web-agent-timeline">{activity.slice(0, 4).map((item, index) => <div key={`${item}-${index}`} className={index === 0 ? "current" : "done"}><span>{index + 1}</span><div><strong>{item}</strong><small>{index === 0 ? "Just now" : `${index * 4 + 2} minutes ago`}</small></div></div>)}</div>
+          <div className="web-tool-row"><span>Flight status</span><span>Transport</span><span>Dining</span><span>Hotel PMS</span></div>
+        </article>
+
+        <article className="web-panel web-control-panel">
+          <div className="web-panel-head"><div><span className="section-label">Agent readiness</span><h2>Safe autonomy controls</h2></div><LightningBoltIcon /></div>
+          <div className="web-control-list">
+            <div><CheckCircledIcon /><span><strong>Context engine</strong><small>Guest, stay, hotel, weather, and itinerary context</small></span><em>Ready</em></div>
+            <div><CheckCircledIcon /><span><strong>Tool allowlist</strong><small>Requests, billing view, transfers, dining, and PMS adapters</small></span><em>Ready</em></div>
+            <div><CheckCircledIcon /><span><strong>Approval gate</strong><small>Required for charges, cancellations, dispatch, and external messages</small></span><em>Active</em></div>
+            <div><ClockIcon /><span><strong>Live model endpoint</strong><small>Connect a server-side Responses API runtime and secret</small></span><em className="pending">Connect</em></div>
+          </div>
+        </article>
+      </section>
+
+      <section className="web-lower-grid">
+        <article className="web-panel web-queue-panel">
+          <div className="web-panel-head"><div><span className="section-label">Live request queue</span><h2>Department workboard</h2></div><span>{openTickets.length} open</span></div>
+          <div className="web-table" role="table" aria-label="Hotel request queue"><div className="web-table-head" role="row"><span>Request</span><span>Department</span><span>Priority</span><span>Status</span><span>Action</span></div>{tickets.filter((ticket) => ticket.status !== "Closed").map((ticket) => <div className="web-table-row" role="row" key={ticket.id}><span><strong>{ticket.title}</strong><small>{ticket.id} · {ticket.minutesOpen}m open</small></span><span>{ticket.department}</span><span className={ticket.priority === "High" ? "web-priority high" : "web-priority"}>{ticket.priority}</span><span className={`status-pill ${statusClass(ticket.status)}`}>{ticket.status}</span><span>{ticket.status === "New" && <button onClick={() => changeStatus(ticket.id, "In progress")}>Accept</button>}{ticket.status === "In progress" && <button onClick={() => changeStatus(ticket.id, "Resolved")}>Resolve</button>}{ticket.status === "Resolved" && <button onClick={() => changeStatus(ticket.id, "Closed")}>Close</button>}</span></div>)}</div>
+        </article>
+
+        <article className="web-panel web-report-panel">
+          <span className="section-label">Management reporting</span><h2>{period} MIS</h2><p>Export the current operational view for leadership and department reviews.</p>
+          <div className="web-report-tabs">{reportPeriods.map((item) => <button key={item} className={period === item ? "active" : ""} onClick={() => setPeriod(item)}>{item}</button>)}</div>
+          <div className="web-report-stat"><span>Tickets handled</span><strong>{tickets.length}</strong></div><div className="web-report-stat"><span>Automated actions</span><strong>18</strong></div><div className="web-report-stat"><span>Estimated time saved</span><strong>3.4h</strong></div>
+          <button className="web-export" onClick={exportWebReport}><DownloadIcon /> Export {period.toLowerCase()} report</button>
+        </article>
+      </section>
+    </main>
+  </div>;
 }
