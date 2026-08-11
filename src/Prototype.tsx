@@ -128,6 +128,12 @@ const reservations: Record<string, Guest> = {
   "TM-8841": { name: "Rhea Shah", hotel: "The Meridian", reservation: "TM-8841", arrival: "20:10", room: "905", contact: "rhea@example.com" },
 };
 
+const reservationContacts: Record<string, { email: string; phone: string }> = {
+  "AG-7K92": { email: "maya@example.com", phone: "+91 98765 43210" },
+  "CH-2048": { email: "arjun@example.com", phone: "+91 98111 22334" },
+  "TM-8841": { email: "rhea@example.com", phone: "+91 98222 33445" },
+};
+
 const wheelchairOptions: ServiceNode[] = [
   { label: "Wheelchair assistance", department: "Concierge", detail: "Arrange trained wheelchair assistance at the requested location.", priority: "High" },
   { label: "Wheelchair ramp", department: "Concierge", detail: "Confirm an accessible ramp and step-free route.", priority: "High" },
@@ -234,7 +240,7 @@ function findRoot(label: string) {
 }
 
 function AppMark({ compact = false }: { compact?: boolean }) {
-  return <div className={`app-mark ${compact ? "compact" : ""}`} aria-label="Intellistay"><span className="brand-symbol" aria-hidden="true"><HomeIcon /></span><span>Intellistay</span></div>;
+  return <div className={`app-mark ${compact ? "compact" : ""}`} aria-label="Intellistay"><span>Intellistay</span></div>;
 }
 
 function Field({ label, ...props }: React.ComponentProps<typeof KeyboardInput> & { label: string }) {
@@ -264,13 +270,13 @@ export default function Prototype() {
     const requested = new URLSearchParams(window.location.search).get("screen");
     return (["home", "concierge", "requests", "profile"] as View[]).includes(requested as View) ? requested as View : "auth";
   });
-  const [authMode, setAuthMode] = useState<"reservation" | "guest">("reservation");
   const [reservationCode, setReservationCode] = useState("AG-7K92");
-  const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
-  const [hotelSearch, setHotelSearch] = useState("");
-  const [selectedHotel, setSelectedHotel] = useState<Hotel | null>(null);
+  const [hotelSearch, setHotelSearch] = useState("Aurora Grand");
+  const [hotelPickerOpen, setHotelPickerOpen] = useState(false);
+  const [selectedHotel, setSelectedHotel] = useState<Hotel | null>(hotels[0]);
+  const [contactRecovery, setContactRecovery] = useState(false);
   const [authError, setAuthError] = useState("");
   const [guest, setGuest] = useState<Guest>(reservations["AG-7K92"]);
   const [sheet, setSheet] = useState<Sheet>(null);
@@ -383,7 +389,7 @@ export default function Prototype() {
 
   const openOperationsPortal = () => {
     dismissKeyboard();
-    window.location.assign("?surface=operations&display=mobile");
+    window.location.assign("?surface=operations&display=mobile&reauth=1");
   };
 
   const addNotice = (title: string, body: string) => {
@@ -394,22 +400,30 @@ export default function Prototype() {
   const login = () => {
     dismissKeyboard();
     setAuthError("");
-    if (authMode === "reservation") {
-      const match = reservations[reservationCode.trim().toUpperCase()];
-      if (!match) return setAuthError("Reservation not found. Try AG-7K92 for the demo.");
-      setGuest(match);
-      setReceiptEmail(match.contact?.includes("@") ? match.contact : "");
-      setView("home");
-      notify(`Welcome back, ${match.name.split(" ")[0]}.`);
-      return;
+    if (!selectedHotel) return setAuthError("Select a participating Intellistay hotel before continuing.");
+    const code = reservationCode.trim().toUpperCase();
+    const directMatch = reservations[code];
+    let match = directMatch?.hotel === selectedHotel.name ? directMatch : undefined;
+    if (!match && contactRecovery) {
+      if (!guestEmail.trim() || !guestPhone.trim()) return setAuthError("Enter both the registered email and phone number to retrieve the reservation.");
+      const recoveredCode = Object.keys(reservations).find((key) => {
+        const record = reservations[key];
+        const contact = reservationContacts[key];
+        return record.hotel === selectedHotel.name && contact?.email.toLowerCase() === guestEmail.trim().toLowerCase() && contact.phone.replace(/\D/g, "") === guestPhone.replace(/\D/g, "");
+      });
+      if (recoveredCode) {
+        match = reservations[recoveredCode];
+        setReservationCode(recoveredCode);
+      }
     }
-    if (!guestName.trim() || (!guestEmail.trim() && !guestPhone.trim())) return setAuthError("Add your name and either a phone number or email address.");
-    if (!selectedHotel) return setAuthError("Choose a participating Intellistay hotel.");
-    const newGuest = { name: guestName.trim(), hotel: selectedHotel.name, reservation: "GUEST-2026", arrival: "Today", contact: guestEmail.trim() || guestPhone.trim() };
-    setGuest(newGuest);
-    setReceiptEmail(guestEmail.trim());
+    if (!match) {
+      setContactRecovery(true);
+      return setAuthError(directMatch ? "That reservation belongs to a different participating hotel. Check the hotel or verify with the registered contact details." : "We could not verify that reservation and hotel combination. Use the registered email and phone number below to retrieve it.");
+    }
+    setGuest(match);
+    setReceiptEmail(reservationContacts[match.reservation]?.email ?? (match.contact?.includes("@") ? match.contact : ""));
     setView("home");
-    notify("Guest access created. No password required for this demo.");
+    notify(`Welcome back, ${match.name.split(" ")[0]}.`);
   };
 
   const openService = (rootLabel?: string) => {
@@ -605,7 +619,7 @@ export default function Prototype() {
 
   const chooseHotel = (hotel: Hotel) => {
     setGuest((current) => ({ ...current, hotel: hotel.name }));
-    setSelectedHotel(hotel); setHotelSearch(""); setSheet(null);
+    setSelectedHotel(hotel); setHotelSearch(hotel.name); setHotelPickerOpen(false); setSheet(null);
     addNotice("Hotel changed", `${hotel.name} is now configuring your available services.`);
     notify(`${hotel.name} selected.`);
   };
@@ -618,18 +632,30 @@ export default function Prototype() {
     })}</div>
   </>;
 
+  const selectAuthHotel = (hotel: Hotel) => {
+    setSelectedHotel(hotel);
+    setHotelSearch(hotel.name);
+    setHotelPickerOpen(false);
+    setAuthError("");
+  };
+
+  const renderAuthHotelPicker = () => <div className="auth-hotel-picker">
+    <label className="search-field"><span>Participating hotel</span><div><MagnifyingGlassIcon /><KeyboardInput value={hotelSearch} onFocus={() => setHotelPickerOpen(true)} onChange={(event) => { const value = event.target.value; const exact = hotels.find((hotel) => hotel.name.toLowerCase() === value.trim().toLowerCase()) ?? null; setHotelSearch(value); setSelectedHotel(exact); setHotelPickerOpen(true); setAuthError(""); }} placeholder="Search hotel, city or pincode" aria-expanded={hotelPickerOpen} aria-controls="auth-hotel-options" /></div></label>
+    {selectedHotel && !hotelPickerOpen && <button className="auth-selected-hotel" onClick={() => setHotelPickerOpen(true)}><span className="hotel-monogram">{selectedHotel.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span><span><strong>{selectedHotel.name}</strong><small>{selectedHotel.city}, {selectedHotel.country} · {selectedHotel.pincode}</small></span><CheckCircledIcon /></button>}
+    {hotelPickerOpen && <div className="hotel-results auth-hotel-results" id="auth-hotel-options" role="listbox" aria-label="Participating hotels">{hotelMatches.length ? hotelMatches.map((hotel) => <button key={hotel.name} role="option" aria-selected={selectedHotel?.name === hotel.name} className={selectedHotel?.name === hotel.name ? "selected" : ""} onClick={() => selectAuthHotel(hotel)}><span><strong>{hotel.name}</strong><small>{hotel.city}, {hotel.country} · {hotel.pincode}</small></span><ChevronRightIcon /></button>) : <p>No participating hotel matches this search.</p>}</div>}
+  </div>;
+
   const renderAuth = () => <MobileScroll className="app-screen auth-scroll"><main className="auth-screen" data-testid="auth-screen">
     <header className="auth-entry-header"><AppMark /><button className="auth-operations-switch" onClick={openOperationsPortal}><DashboardIcon /><span>Hotel team</span><ChevronRightIcon /></button></header>
-    <div className="auth-hero"><span className="eyebrow">Your stay, already in motion</span><h1>Welcome to a more thoughtful stay.</h1><p>Use a reservation, or continue as a guest with your name and one contact method.</p></div>
-    <div className="segment-control" role="tablist" aria-label="Access method"><button role="tab" aria-selected={authMode === "reservation"} className={authMode === "reservation" ? "active" : ""} onClick={() => setAuthMode("reservation")}>Reservation</button><button role="tab" aria-selected={authMode === "guest"} className={authMode === "guest" ? "active" : ""} onClick={() => setAuthMode("guest")} data-testid="guest-access-tab">Guest access</button></div>
-    {authMode === "reservation" ? <section className="access-form"><Field label="Reservation number" value={reservationCode} onChange={(event) => setReservationCode(event.target.value)} autoCapitalize="characters" data-testid="reservation-input" /><p className="field-help"><IdCardIcon /> Demo reservation: <button onClick={() => setReservationCode("AG-7K92")}>AG-7K92</button></p><div className="matched-stay"><span className="hotel-monogram">AG</span><span><strong>Aurora Grand</strong><small>Mumbai · Arrival 18:40</small></span><CheckCircledIcon /></div></section> : <section className="access-form"><Field label="Full name" value={guestName} onChange={(event) => setGuestName(event.target.value)} placeholder="Your name" /><div className="two-fields"><Field label="Phone" value={guestPhone} onChange={(event) => setGuestPhone(event.target.value)} placeholder="Optional" inputMode="tel" /><Field label="Email" value={guestEmail} onChange={(event) => setGuestEmail(event.target.value)} placeholder="Optional" inputMode="email" /></div>{renderHotelSearch(false)}</section>}
+    <div className="auth-hero"><span className="eyebrow">Your stay, already in motion</span><h1>Find your stay.</h1><p>Select the participating hotel first. We verify the reservation against that property before opening the guest experience.</p></div>
+    <section className="access-form">{renderAuthHotelPicker()}<Field label="Reservation number" value={reservationCode} onChange={(event) => { setReservationCode(event.target.value); setAuthError(""); }} autoCapitalize="characters" data-testid="reservation-input" /><p className="field-help"><IdCardIcon /> Demo: Aurora Grand with <button onClick={() => { selectAuthHotel(hotels[0]); setReservationCode("AG-7K92"); }}>AG-7K92</button></p>{contactRecovery && <section className="contact-recovery" aria-label="Retrieve reservation with registered contact"><span className="section-label">Reservation recovery</span><p>Enter both details registered with the selected hotel. Intellistay uses them only to find the matching reservation.</p><Field label="Registered email" value={guestEmail} onChange={(event) => setGuestEmail(event.target.value)} placeholder="maya@example.com" inputMode="email" /><Field label="Registered phone" value={guestPhone} onChange={(event) => setGuestPhone(event.target.value)} placeholder="+91 98765 43210" inputMode="tel" /></section>}</section>
     {authError && <p className="form-error"><ExclamationTriangleIcon /> {authError}</p>}
-    <button className="primary-button" onClick={login} data-testid="continue-button">Continue securely <ChevronRightIcon /></button>
+    <button className="primary-button" onClick={login} data-testid="continue-button">{contactRecovery ? "Verify and find reservation" : "Verify stay"} <ChevronRightIcon /></button>
     <p className="privacy-note">Demo data stays in memory and resets on reload. Intellistay does not read files, contacts, photos, or device history.</p>
   </main></MobileScroll>;
 
   const renderHome = () => <main className="screen-content home-screen" data-testid="home-screen">
-    <header className="screen-header home-header"><AppMark compact /><div className="header-actions"><button className="icon-button staff-entry-button" aria-label="Switch to hotel operations" onClick={openOperationsPortal}><DashboardIcon /></button><button className="icon-button notice-button" aria-label="Notifications" onClick={() => { setNotices((all) => all.map((item) => ({ ...item, read: true }))); setSheet("notifications"); }}><BellIcon />{unreadNotices && <i className="notification-dot" />}</button><button className="icon-button" aria-label="Profile" onClick={() => changeView("profile")}><PersonIcon /></button></div></header>
+    <header className="screen-header home-header"><AppMark compact /><div className="header-actions"><button className="icon-button notice-button" aria-label="Notifications" onClick={() => { setNotices((all) => all.map((item) => ({ ...item, read: true }))); setSheet("notifications"); }}><BellIcon />{unreadNotices && <i className="notification-dot" />}</button><button className="icon-button" aria-label="Profile" onClick={() => changeView("profile")}><PersonIcon /></button></div></header>
     <section className="greeting"><p>Good evening,</p><h1>{firstName}.</h1><button className="stay-line stay-switch" onClick={() => setSheet("hotel")}><SewingPinIcon /><strong>{guest.hotel}</strong><span />Change hotel <ChevronRightIcon /></button></section>
     <section className="proactive-card"><div className="proactive-label"><span><LightningBoltIcon /></span> Proactive for you</div><h2>{proactiveCopy.title}</h2><p className="proactive-body">{proactiveCopy.body}</p><div className="progress-list"><div className="done"><CheckCircledIcon /><span><strong>Flight delay detected</strong><small>AI-624 · 42 minutes</small></span></div><div className="done"><CheckCircledIcon /><span><strong>Transfer updated</strong><small>New pickup 19:30</small></span></div><div className="current"><ClockIcon /><span><strong>Dinner protected</strong><small>20:00 at Terrace</small></span></div></div><button className="sand-button" onClick={() => proactiveCopy.root === "Airport Transfer" ? setSheet("review") : openService(proactiveCopy.root)}>{proactiveCopy.action} <ChevronRightIcon /></button><button className="outline-button light" onClick={() => changeView("concierge")}><ChatBubbleIcon /> Ask Intellistay</button></section>
     <button className="reservation-row" onClick={() => setSheet("checkout")}><span className="reservation-icon"><ReaderIcon /></span><span><small>Checkout & billing</small><strong>View invoice or itemized bill</strong></span><ChevronRightIcon /></button>
@@ -637,7 +663,7 @@ export default function Prototype() {
   </main>;
 
   const renderConcierge = () => <main className="screen-content concierge-screen" data-testid="concierge-screen">
-    <header className="screen-header"><div><span className="eyebrow">AI concierge</span><h1>How can I help?</h1></div><button className="credit-pill" onClick={() => setSheet("credits")} aria-label={`${credits} credits, view details`}><LightningBoltIcon /> {credits} <ChevronRightIcon /></button></header>
+    <header className="screen-header concierge-header"><button className="icon-button light-bg" aria-label="Back to home" onClick={() => changeView("home")}><ChevronLeftIcon /></button><div><span className="eyebrow">AI concierge</span><h1>How can I help?</h1></div><button className="credit-pill" onClick={() => setSheet("credits")} aria-label={`${credits} credits, view details`}><LightningBoltIcon /> {credits} <ChevronRightIcon /></button></header>
     <section className="interest-prompt"><span className="pulse-dot" /><div><small>Proactive suggestion</small><strong>{proactiveCopy.body}</strong></div><button onClick={() => openService(proactiveCopy.root)}>View</button></section>
     <div className="quick-actions service-shortcuts" aria-label="Concierge services">
       <button onClick={() => openService("Wheelchair")}><AccessibilityIcon />Wheelchair</button>
@@ -662,6 +688,7 @@ export default function Prototype() {
   const renderProfile = () => <main className="screen-content profile-screen" data-testid="profile-screen">
     <header className="profile-hero"><span className="profile-avatar">{guest.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span><h1>{guest.name}</h1><p>{guest.hotel} · #{guest.reservation}</p></header>
     <section className="profile-section"><span className="section-label">Stay & account</span><button onClick={() => setSheet("hotel")}><MagnifyingGlassIcon /><span><strong>Change participating hotel</strong><small>Search by hotel, city, region or pincode</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("checkout")}><FileTextIcon /><span><strong>Checkout & billing</strong><small>View, email or download both documents</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("notifications")}><BellIcon /><span><strong>Proactive notifications</strong><small>Push {pushEnabled ? "on" : "off"} · email {emailUpdates ? "on" : "off"}</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("feedback")}><HeartIcon /><span><strong>Share feedback</strong><small>Delivered to participating hotel operations</small></span><ChevronRightIcon /></button></section>
+    <section className="profile-section experience-switch-section"><span className="section-label">Access & role</span><button onClick={openOperationsPortal}><DashboardIcon /><span><strong>Hotel team sign in</strong><small>Approved property email or partner login required</small></span><ChevronRightIcon /></button></section>
     <section className="privacy-card"><CheckCircledIcon /><div><strong>Private demo mode</strong><p>No contacts, files, photos, location history, or device identifiers are read. Data resets on reload.</p></div></section>
     <button className="text-button" onClick={() => { setView("auth"); dismissKeyboard(); }}>Return to welcome & sign-in</button>
   </main>;
@@ -685,7 +712,7 @@ export default function Prototype() {
 
   const renderSheetContent = () => {
     if (sheet === "review") return <div className="sheet-stack"><div className="change-row"><CheckCircledIcon /><div><strong>Flight AI-624</strong><span>Delayed 42 minutes · tracked live</span></div></div><div className="change-row"><CheckCircledIcon /><div><strong>Airport transfer</strong><span>Driver notified · pickup 19:30</span></div></div><div className="change-row"><ClockIcon /><div><strong>Dinner at Terrace</strong><span>Moved to 20:00 · table held</span></div></div><button className="primary-button" onClick={() => { setSheet(null); notify("Your updated plan is confirmed."); }}>Looks good <CheckCircledIcon /></button><button className="secondary-button" onClick={() => { setSheet(null); changeView("concierge"); }}>Ask for a change</button></div>;
-    if (sheet === "service") return <div className="sheet-stack service-browser">{servicePath.length > 0 && !selectedService && <button className="back-link" onClick={() => setServicePath((current) => current.slice(0, -1))}><ChevronLeftIcon /> Back</button>}{!selectedService ? <div className="special-list">{currentServiceNodes.map((node) => <button key={node.label} onClick={() => chooseService(node)}><span className="service-icon">{node.department === "Maintenance" ? <GearIcon /> : node.department === "Dining" ? <CalendarIcon /> : node.label.includes("Wheelchair") ? <AccessibilityIcon /> : <StarIcon />}</span><span><strong>{node.label}</strong><small>{node.children?.length ? `${node.children.length} options` : `Routes to ${node.department}`}</small></span><ChevronRightIcon /></button>)}</div> : <><div className="selected-request"><CheckCircledIcon /><span><small>Selected · {selectedService.department}</small><strong>{selectedService.label}</strong></span></div><p className="selection-explainer">{selectedService.detail ?? `The ${selectedService.department} team will receive this request immediately.`}</p><label className="field"><span>Timing or comments (optional)</span><KeyboardTextarea value={requestDetail} onChange={(event) => setRequestDetail(event.target.value)} placeholder="Tell the team when and where" rows={3} /></label><button className="primary-button" onClick={submitService}>Submit tracked request <ChevronRightIcon /></button><button className="secondary-button" onClick={() => setSelectedService(null)}>Choose another option</button></>}<button className="cancel-button" onClick={() => { dismissKeyboard(); setSheet(null); setSelectedService(null); setServicePath([]); }}>Cancel</button></div>;
+    if (sheet === "service") return <div className="sheet-stack service-browser">{(servicePath.length > 0 || selectedService) && <button className="back-link" onClick={() => selectedService ? setSelectedService(null) : setServicePath((current) => current.slice(0, -1))}><ChevronLeftIcon /> Back</button>}{!selectedService ? <div className="special-list">{currentServiceNodes.map((node) => <button key={node.label} onClick={() => chooseService(node)}><span className="service-icon">{node.department === "Maintenance" ? <GearIcon /> : node.department === "Dining" ? <CalendarIcon /> : node.label.includes("Wheelchair") ? <AccessibilityIcon /> : <StarIcon />}</span><span><strong>{node.label}</strong><small>{node.children?.length ? `${node.children.length} options` : `Routes to ${node.department}`}</small></span><ChevronRightIcon /></button>)}</div> : <><div className="selected-request"><CheckCircledIcon /><span><small>Selected · {selectedService.department}</small><strong>{selectedService.label}</strong></span></div><p className="selection-explainer">{selectedService.detail ?? `The ${selectedService.department} team will receive this request immediately.`}</p><label className="field"><span>Timing or comments (optional)</span><KeyboardTextarea value={requestDetail} onChange={(event) => setRequestDetail(event.target.value)} placeholder="Tell the team when and where" rows={3} /></label><button className="primary-button" onClick={submitService}>Submit tracked request <ChevronRightIcon /></button></>}<button className="cancel-button" onClick={() => { dismissKeyboard(); setSheet(null); setSelectedService(null); setServicePath([]); }}>Cancel</button></div>;
     if (sheet === "ticket" && selectedTicket) return <div className="sheet-stack"><div className="ticket-detail-head"><span className={`status-pill ${statusClass(selectedTicket.status)}`}>{selectedTicket.status}</span><span>{selectedTicket.id}</span></div><p className="ticket-detail-copy">{selectedTicket.detail}</p><div className="ticket-timeline"><div className="done"><CheckCircledIcon /><span><strong>Request received</strong><small>Routed to {selectedTicket.department}</small></span></div><div className={selectedTicket.status === "New" ? "current" : "done"}>{selectedTicket.status === "New" ? <ClockIcon /> : <CheckCircledIcon />}<span><strong>Team acknowledged</strong><small>{selectedTicket.status === "New" ? "Reminder active" : "In progress"}</small></span></div><div className={selectedTicket.status === "Resolved" || selectedTicket.status === "Closed" ? "done" : "future"}><CheckCircledIcon /><span><strong>Resolved</strong><small>{selectedTicket.status === "Resolved" || selectedTicket.status === "Closed" ? "Complete" : "Waiting"}</small></span></div></div><button className="secondary-button" onClick={() => setSheet("feedback")}>Rate this service</button></div>;
     if (sheet === "feedback") return <div className="sheet-stack"><div className="delivery-note"><EnvelopeClosedIcon /><span>Feedback is delivered to <strong>{currentHotel.opsEmail}</strong> and appears in Operations.</span></div><label className="field"><span>What are you rating?</span><select value={feedbackType} onChange={(event) => setFeedbackType(event.target.value)}><option>Service request</option><option>Concierge</option><option>Room</option><option>Dining</option><option>Checkout</option><option>Other</option></select></label><div className="rating-control" aria-label="Rating required">{[1, 2, 3, 4, 5].map((value) => <button key={value} className={rating >= value ? "selected" : ""} aria-label={`${value} star${value > 1 ? "s" : ""}`} onClick={() => setRating(value)}><StarIcon /></button>)}</div><p className="rating-help">Rating is required; comments are optional.</p><label className="field"><span>Comments (optional)</span><KeyboardTextarea value={feedbackComment} onChange={(event) => setFeedbackComment(event.target.value)} placeholder="Tell the hotel what stood out" rows={4} /></label><button className="primary-button" disabled={!rating} onClick={submitFeedback}>Submit feedback</button></div>;
     if (sheet === "checkout") return <div className="sheet-stack"><div className="paid-banner"><CheckCircledIcon /><div><strong>Paid in full</strong><span>Final balance ₹0</span></div></div><div className="segment-control bill-tabs" role="tablist" aria-label="Billing document"><button role="tab" aria-selected={billView === "Invoice"} className={billView === "Invoice" ? "active" : ""} onClick={() => setBillView("Invoice")}>View invoice</button><button role="tab" aria-selected={billView === "Itemized Bill"} className={billView === "Itemized Bill" ? "active" : ""} onClick={() => setBillView("Itemized Bill")}>Itemized bill</button></div><div className="bill-summary"><div><span>Room · 2 nights</span><strong>₹48,000</strong></div>{billView === "Itemized Bill" && <><div><span>Dining · Terrace</span><strong>₹6,850</strong></div><div><span>Spa · Cabana</span><strong>₹4,200</strong></div></>}<div className="total"><span>Total paid</span><strong>₹59,050</strong></div></div><Field label="Email receipt" value={receiptEmail} onChange={(event) => setReceiptEmail(event.target.value)} placeholder="Enter email for guest access" inputMode="email" /><button className="primary-button" onClick={emailReceipt}><EnvelopeClosedIcon /> Email {billView.toLowerCase()}</button><button className="secondary-button" onClick={() => void downloadStayPdf(billView)}><DownloadIcon /> Download {billView.toLowerCase()} PDF</button><p className="privacy-note compact"><CheckCircledIcon /> Review first, then choose email or local PDF.</p></div>;
@@ -857,8 +884,11 @@ function sectionIcon(section: OpsSection) {
 }
 
 export function WebOperationsDashboard() {
-  const mobileExperience = new URLSearchParams(window.location.search).get("display") === "mobile";
+  const operationsQuery = new URLSearchParams(window.location.search);
+  const mobileExperience = operationsQuery.get("display") === "mobile";
+  const forceReauth = operationsQuery.get("reauth") === "1";
   const [session, setSession] = useState<OpsSession | null>(() => {
+    if (forceReauth) return null;
     try { return JSON.parse(window.sessionStorage.getItem("intellistay-ops-session") || "null") as OpsSession | null; } catch { return null; }
   });
   const initialHotel = hotels.find((hotel) => hotel.name === session?.hotelName) ?? hotels[0];
@@ -882,6 +912,7 @@ export function WebOperationsDashboard() {
   const [mobileTab, setMobileTab] = useState<"Pulse" | "Requests" | "Feedback" | "More">("Pulse");
   const [mobileOpsScale, setMobileOpsScale] = useState(1);
   const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
+  const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
   const [remindersAcknowledged, setRemindersAcknowledged] = useState(false);
   const [browserAlertsEnabled, setBrowserAlertsEnabled] = useState(() => "Notification" in window && Notification.permission === "granted");
   const channelRef = useRef<BroadcastChannel | null>(null);
@@ -966,6 +997,11 @@ export function WebOperationsDashboard() {
   };
 
   const returnToGuestSignIn = () => window.location.assign("?");
+  const returnToOperationsHome = () => {
+    setMobileTab("Pulse");
+    setNotificationCenterOpen(false);
+    setMobileSettingsOpen(false);
+  };
 
   const enableBrowserAlerts = async () => {
     if (!("Notification" in window)) return showToast("Browser notifications are not supported on this device.");
@@ -1010,15 +1046,16 @@ export function WebOperationsDashboard() {
   const mobileOpsFrameStyle = { width: 393 * mobileOpsScale, height: 852 * mobileOpsScale };
   const mobileOpsShellStyle = { transform: `scale(${mobileOpsScale})` };
   const renderMobileOperations = () => <div className="mobile-ops-stage"><div className="mobile-ops-scale-box" style={mobileOpsFrameStyle}><div className="mobile-ops-shell" style={mobileOpsShellStyle} data-testid="mobile-ops-workspace">
-    <header className="mobile-ops-header"><button className="mobile-ops-back" onClick={returnToGuestSignIn} aria-label="Back to guest sign-in"><ChevronLeftIcon /></button><div><span className="eyebrow">{hotel.name}</span><strong>Hotel Operations</strong></div><button className="mobile-ops-bell" aria-label="Operations notifications" aria-expanded={notificationCenterOpen} onClick={() => { setNotificationCenterOpen(true); setRemindersAcknowledged(true); }}><BellIcon />{!remindersAcknowledged && reminderTickets.length > 0 && <i>{reminderTickets.length}</i>}</button></header>
+    <header className="mobile-ops-header">{mobileTab === "Pulse" ? <span className="mobile-ops-brand-mark" aria-hidden="true">i</span> : <button className="mobile-ops-back" onClick={returnToOperationsHome} aria-label="Back to operations dashboard"><ChevronLeftIcon /></button>}<div><span className="eyebrow">{hotel.name}</span><strong>Hotel Operations</strong></div><div className="mobile-ops-header-actions"><button className="mobile-ops-icon-button" aria-label="Operations settings" aria-expanded={mobileSettingsOpen} onClick={() => setMobileSettingsOpen(true)}><GearIcon /></button><button className="mobile-ops-bell" aria-label="Operations notifications" aria-expanded={notificationCenterOpen} onClick={() => { setNotificationCenterOpen(true); setRemindersAcknowledged(true); }}><BellIcon />{!remindersAcknowledged && reminderTickets.length > 0 && <i>{reminderTickets.length}</i>}</button></div></header>
     <main className="mobile-ops-content">
       {mobileTab === "Pulse" && <section className="mobile-ops-dashboard"><div className="mobile-ops-dashboard-title"><div><span className="eyebrow">Live property operations</span><h1>Today at {hotel.name}</h1><p>{raised} requests across guest-facing teams.</p></div><span className="mobile-ops-live"><i className="live-dot" /> Live</span></div><button className="mobile-ops-alert-strip" onClick={() => setMobileTab("Requests")}><span><ExclamationTriangleIcon /></span><span><strong>{reminderTickets.length} requests need attention</strong><small>{dead ? `${dead} overdue · ` : ""}{tickets.filter((ticket) => ticket.status === "New").length} waiting to be accepted</small></span><ChevronRightIcon /></button><section className="mobile-ops-kpi-grid" aria-label="Today's operations summary"><article><span>New</span><strong>{tickets.filter((ticket) => ticket.status === "New").length}</strong><small>Awaiting owner</small></article><article><span>In progress</span><strong>{inProgress}</strong><small>Teams working</small></article><article className={dead ? "alert" : ""}><span>At risk</span><strong>{dead}</strong><small>SLA breached</small></article><article><span>Resolved</span><strong>{resolved}</strong><small>Ready to close</small></article></section><section className="mobile-ops-action-queue"><div className="mobile-ops-section-head"><div><span className="section-label">Priority queue</span><h2>Act next</h2></div><button onClick={() => setMobileTab("Requests")}>View all</button></div><div>{reminderTickets.slice(0, 3).map((ticket) => <article key={ticket.id}><div><span className={`status-pill ${statusClass(ticket.status)}`}>{ticket.status}</span><small>{ticket.id} · {ticket.queueMinutes}m</small></div><strong>{ticket.title}</strong><p>Room {ticket.room} · {ticket.department}</p>{ticket.status === "New" ? <button onClick={() => changeStatus(ticket.id, "In progress")}>Accept request</button> : ticket.status === "Dead" ? <button onClick={() => changeStatus(ticket.id, "In progress")}>Recover request</button> : <button onClick={() => changeStatus(ticket.id, "Resolved")}>Mark resolved</button>}</article>)}</div></section><section className="mobile-ops-brief"><span><small>First-time resolved</small><strong>{ftrRate}%</strong></span><span><small>Average queue</small><strong>{averageQueue}m</strong></span><span><small>Guest sentiment</small><strong>{guestSentiment}</strong></span></section></section>}
       {mobileTab === "Requests" && <section className="mobile-ops-section mobile-ops-page"><span className="eyebrow">Service command center</span><h1>Requests</h1><p className="mobile-ops-intro">Accept, resolve, close, or invalidate requests. Guest tracking updates instantly.</p><div className="mobile-ops-request-list">{tickets.map((ticket) => <article key={ticket.id}><div><span className={`status-pill ${statusClass(ticket.status)}`}>{ticket.status}</span><small>{ticket.id} · {ticket.department}</small></div><h2>{ticket.title}</h2><p>{ticket.guestName} · Room {ticket.room} · {ticket.queueMinutes}m queue</p><div className="mobile-ops-request-actions">{ticket.status === "New" && <button onClick={() => changeStatus(ticket.id, "In progress")}>Accept</button>}{(ticket.status === "In progress" || ticket.status === "Dead") && <button onClick={() => changeStatus(ticket.id, "Resolved")}>Resolve</button>}{ticket.status === "Resolved" && <button onClick={() => changeStatus(ticket.id, "Closed")}>Close</button>}{ticket.status !== "Closed" && ticket.status !== "N/A / Invalid" && <button className="subtle" onClick={() => changeStatus(ticket.id, "N/A / Invalid")}>Invalid</button>}</div></article>)}</div></section>}
       {mobileTab === "Feedback" && <section className="mobile-ops-section mobile-ops-page"><span className="eyebrow">Voice of the guest</span><h1>Feedback</h1><p className="mobile-ops-intro">Questions and concerns are highlighted for a personal response.</p>{selectedFeedback && (() => { const item = feedback.find((entry) => entry.id === selectedFeedback); if (!item) return null; return <article className="mobile-ops-response"><strong>Reply to {item.guestName}</strong><small>Sent to {item.guestEmail}</small><textarea value={responseDraft} onChange={(event) => setResponseDraft(event.target.value)} rows={5} placeholder="Acknowledge, explain the action, and offer a next step." /><div><button onClick={() => sendFeedbackResponse(item)}><EnvelopeClosedIcon /> Send</button><button onClick={() => { setSelectedFeedback(""); setResponseDraft(""); }}>Cancel</button></div></article>; })()}<div className="mobile-ops-feedback-list">{feedback.map((item) => <article key={item.id}><div><span className="ops-stars" aria-label={`${item.rating} out of 5 stars`}>{[1,2,3,4,5].map((star) => <StarIcon key={star} className={star <= item.rating ? "filled" : ""} />)}</span><span className={`feedback-state ${item.status === "Needs response" ? "needs" : ""}`}>{item.status}</span></div><strong>{item.guestName} · {item.type}</strong><p>{item.comment}</p>{item.response && <small className="mobile-ops-replied">Hotel replied: {item.response}</small>}<button onClick={() => { setSelectedFeedback(item.id); setResponseDraft(item.response || ""); }}>{item.response ? "Update response" : "Respond to guest"} <ChevronRightIcon /></button></article>)}</div></section>}
-      {mobileTab === "More" && <section className="mobile-ops-section mobile-ops-page"><span className="eyebrow">Management intelligence</span><h1>Reports & insights</h1><section className="mobile-ops-more-card"><span className="section-label">Performance</span><div className="mobile-ops-mini-metrics"><span><strong>{ftrRate}%</strong><small>First-time resolved</small></span><span><strong>{fastest}m</strong><small>Fastest resolution</small></span><span><strong>{averageQueue}m</strong><small>Average queue</small></span><span><strong>{guestSentiment}</strong><small>Guest sentiment</small></span></div></section><section className="mobile-ops-more-card"><span className="section-label">Reports & MIS</span><div className="mobile-ops-periods">{reportPeriods.map((item) => <button key={item} className={period === item ? "active" : ""} onClick={() => setPeriod(item)}>{item}</button>)}</div><button className="mobile-ops-primary" onClick={exportWebReport}><DownloadIcon /> Download {period.toLowerCase()} report</button><button className="mobile-ops-secondary" onClick={emailWebReport}><EnvelopeClosedIcon /> Email report</button></section><section className="mobile-ops-more-card"><span className="section-label">AI analyst</span><p>{aiAnswer}</p><div className="mobile-ops-ai"><input value={aiQuery} onChange={(event) => setAiQuery(event.target.value)} placeholder="Ask about queues, guests or FTR" /><button onClick={() => runAiAnalysis()}><LightningBoltIcon /></button></div></section><section className="mobile-ops-account"><strong>{session!.role}</strong><small>{session!.email}</small><button onClick={returnToGuestSignIn}><ChevronLeftIcon /> Reservation or guest sign-in</button><button className="danger" onClick={signOut}>Sign out hotel team</button></section></section>}
+      {mobileTab === "More" && <section className="mobile-ops-section mobile-ops-page"><span className="eyebrow">Management intelligence</span><h1>Reports & insights</h1><section className="mobile-ops-more-card"><span className="section-label">Service improvement metrics</span><div className="mobile-ops-mini-metrics">{metrics.map((metric) => <span key={metric.label} className={metric.alert ? "alert" : ""}><strong>{metric.value}</strong><small>{metric.label}</small><em>{metric.note}</em></span>)}<span><strong>{guestSentiment}</strong><small>Guest sentiment</small><em>{feedbackNeedsResponse} need a response</em></span></div></section><section className="mobile-ops-more-card"><span className="section-label">Reports & MIS</span><div className="mobile-ops-periods">{reportPeriods.map((item) => <button key={item} className={period === item ? "active" : ""} onClick={() => setPeriod(item)}>{item}</button>)}</div><button className="mobile-ops-primary" onClick={exportWebReport}><DownloadIcon /> Download {period.toLowerCase()} report</button><button className="mobile-ops-secondary" onClick={emailWebReport}><EnvelopeClosedIcon /> Email report</button></section><section className="mobile-ops-more-card"><span className="section-label">AI analyst</span><p>{aiAnswer}</p><div className="mobile-ops-ai"><input value={aiQuery} onChange={(event) => setAiQuery(event.target.value)} placeholder="Ask about queues, guests or FTR" /><button onClick={() => runAiAnalysis()}><LightningBoltIcon /></button></div></section><section className="mobile-ops-account"><strong>{session!.role}</strong><small>{session!.email}</small><button onClick={() => setMobileSettingsOpen(true)}><GearIcon /> Open access settings</button></section></section>}
     </main>
     <nav className="mobile-ops-nav" aria-label="Hotel operations mobile navigation">{(["Pulse", "Requests", "Feedback", "More"] as const).map((item) => <button key={item} className={mobileTab === item ? "active" : ""} onClick={() => setMobileTab(item)}>{item === "Pulse" ? <DashboardIcon /> : item === "Requests" ? <ClipboardIcon /> : item === "Feedback" ? <HeartIcon /> : <FileTextIcon />}<span>{item === "Pulse" ? "Dashboard" : item === "Requests" ? "Queue" : item === "More" ? "Reports" : item}</span>{item === "Requests" && reminderTickets.length > 0 && <i>{reminderTickets.length}</i>}</button>)}</nav>
     {notificationCenterOpen && <aside className="mobile-ops-notifications" role="dialog" aria-label="Operations notifications"><header><div><span className="eyebrow">Hourly follow-up</span><h2>Notifications</h2></div><button onClick={() => setNotificationCenterOpen(false)} aria-label="Close notifications"><Cross2Icon /></button></header><p>Every open request is reminded immediately and again every hour until its status changes.</p><div>{reminderTickets.map((ticket) => <button key={ticket.id} onClick={() => { setMobileTab("Requests"); setNotificationCenterOpen(false); }}><span className={`ticket-status-dot ${statusClass(ticket.status)}`} /><span><strong>{ticket.title}</strong><small>{ticket.id} · {ticket.status} · next hourly follow-up scheduled</small></span><ChevronRightIcon /></button>)}</div>{!reminderTickets.length && <div className="ops-empty"><CheckCircledIcon /><strong>No active reminders.</strong><span>All guest requests have completed their action loop.</span></div>}<button className="mobile-ops-primary" onClick={() => void enableBrowserAlerts()}><BellIcon /> {browserAlertsEnabled ? "Browser alerts enabled" : "Enable browser alerts"}</button></aside>}
+    {mobileSettingsOpen && <aside className="mobile-ops-notifications mobile-ops-settings" role="dialog" aria-label="Hotel operations settings"><header><div><span className="eyebrow">Role-restricted access</span><h2>Settings</h2></div><button onClick={() => setMobileSettingsOpen(false)} aria-label="Close settings"><Cross2Icon /></button></header><section className="mobile-ops-settings-profile"><span className="hotel-monogram">{hotel.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span><div><strong>{session!.role}</strong><small>{session!.email}</small><em>{hotel.name}</em></div></section><p>This hotel workspace is limited to the participating property associated with the verified staff login. Guest and hotel records remain separated.</p><button className="mobile-ops-secondary" onClick={returnToGuestSignIn}><PersonIcon /> Switch to guest sign-in</button><button className="mobile-ops-secondary danger" onClick={signOut}>Sign out hotel team</button></aside>}
     {toast && <div className="toast" role="status"><CheckCircledIcon />{toast}</div>}
   </div></div></div>;
 

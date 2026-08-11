@@ -85,7 +85,7 @@ button {
 .app-mark {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 0;
   color: var(--forest);
   font-family: var(--serif);
   font-size: 29px;
@@ -94,7 +94,7 @@ button {
 }
 
 .app-mark.compact {
-  gap: 9px;
+  gap: 0;
   font-size: 22px;
 }
 
@@ -236,6 +236,70 @@ button {
   font-size: 14px;
   line-height: 1.55;
 }
+
+.auth-hotel-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.auth-selected-hotel {
+  display: grid;
+  width: 100%;
+  min-height: 64px;
+  grid-template-columns: 38px minmax(0, 1fr) 18px;
+  gap: 11px;
+  align-items: center;
+  padding: 11px 12px;
+  border: 1px solid rgba(127, 155, 140, .34);
+  border-radius: 14px;
+  background: rgba(168, 183, 160, .14);
+  text-align: left;
+}
+
+.auth-selected-hotel > span:nth-child(2) {
+  display: grid;
+  gap: 3px;
+}
+
+.auth-selected-hotel strong { color: var(--forest); font-size: 12px; }
+.auth-selected-hotel small { color: var(--muted); font-size: 9px; }
+.auth-selected-hotel > svg { color: var(--eucalyptus); }
+
+.auth-hotel-results {
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.auth-hotel-results > p {
+  padding: 16px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.contact-recovery {
+  display: grid;
+  gap: 12px;
+  margin-top: 3px;
+  padding: 15px;
+  border: 1px solid rgba(185, 111, 82, .22);
+  border-radius: 16px;
+  background: rgba(255, 247, 241, .74);
+}
+
+.contact-recovery > p {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.concierge-header {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.concierge-header > div { min-width: 0; }
 
 .segment-control {
   display: grid;
@@ -3012,10 +3076,11 @@ button {
 }
 
 .mobile-ops-auth { display: flex; min-height: 0; flex-direction: column; overflow-y: auto; padding-bottom: 16px; background: #f7f4ed; }
-.mobile-ops-auth-header,
-.mobile-ops-header { display: grid; min-height: 72px; grid-template-columns: 40px minmax(0,1fr) 40px; gap: 12px; align-items: center; padding: 12px 18px; }
+.mobile-ops-auth-header { display: grid; min-height: 72px; grid-template-columns: 40px minmax(0,1fr) 40px; gap: 12px; align-items: center; padding: 12px 18px; }
+.mobile-ops-header { display: grid; min-height: 72px; grid-template-columns: 40px minmax(0,1fr) 82px; gap: 10px; align-items: center; padding: 12px 18px; }
 .mobile-ops-back { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--paper-strong); color: var(--forest); }
 .mobile-ops-back svg { width: 17px; height: 17px; }
+.mobile-ops-brand-mark { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 50%; background: rgba(168,183,160,.32); color: var(--forest); font-family: var(--serif); font-size: 23px; font-weight: 600; }
 .mobile-ops-auth-brand { display: grid; gap: 2px; min-width: 0; }
 .mobile-ops-auth-brand span { color: var(--forest); font-family: var(--serif); font-size: 23px; font-weight: 600; line-height: 1; }
 .mobile-ops-auth-brand strong { color: var(--muted); font-size: 9px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
@@ -3045,6 +3110,9 @@ button {
 .mobile-ops-header > div { display: grid; gap: 2px; min-width: 0; }
 .mobile-ops-header .eyebrow { overflow: hidden; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .mobile-ops-header strong { color: var(--forest); font-family: var(--sans); font-size: 16px; font-weight: 600; }
+.mobile-ops-header-actions { display: flex !important; gap: 6px !important; align-items: center; justify-content: flex-end; }
+.mobile-ops-icon-button { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--paper-strong); color: var(--forest); }
+.mobile-ops-icon-button svg { width: 16px; height: 16px; }
 .mobile-ops-bell { position: relative; display: grid; width: 38px; height: 38px; place-items: center; border: 0; border-radius: 50%; background: var(--forest); color: var(--paper); }
 .mobile-ops-bell i { position: absolute; top: -3px; right: -2px; display: grid; min-width: 18px; height: 18px; place-items: center; padding: 0 4px; border: 2px solid var(--paper); border-radius: 999px; background: var(--clay); color: white; font-size: 8px; font-style: normal; }
 .mobile-ops-shell,
@@ -3158,6 +3226,8 @@ button {
 .mobile-ops-mini-metrics span { display: grid; gap: 3px; }
 .mobile-ops-mini-metrics strong { color: var(--forest); font-family: var(--serif); font-size: 23px; }
 .mobile-ops-mini-metrics small { color: var(--muted); font-size: 7px; }
+.mobile-ops-mini-metrics em { color: var(--muted); font-size: 7px; font-style: normal; line-height: 1.3; }
+.mobile-ops-mini-metrics span.alert strong { color: var(--clay); }
 .mobile-ops-periods { display: flex; gap: 5px; margin: 13px 0 10px; overflow-x: auto; }
 .mobile-ops-periods button { min-height: 28px; flex: 0 0 auto; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); font-size: 7px; }
 .mobile-ops-periods button.active { border-color: var(--forest); background: var(--forest); color: var(--paper); }
@@ -3174,6 +3244,13 @@ button {
 .mobile-ops-account small { color: var(--muted); font-size: 7px; }
 .mobile-ops-account button { display: flex; min-height: 38px; align-items: center; justify-content: center; gap: 7px; margin-top: 7px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--forest); font-size: 8px; }
 .mobile-ops-account button.danger { margin-top: 2px; color: var(--clay); }
+.mobile-ops-settings-profile { display: grid; grid-template-columns: 42px minmax(0,1fr); gap: 11px; align-items: center; margin-top: 22px; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: var(--paper-strong); }
+.mobile-ops-settings-profile > div { display: grid; gap: 3px; }
+.mobile-ops-settings-profile strong { color: var(--forest); font-size: 11px; }
+.mobile-ops-settings-profile small,
+.mobile-ops-settings-profile em { color: var(--muted); font-size: 8px; font-style: normal; }
+.mobile-ops-settings .mobile-ops-secondary { margin-top: 8px; }
+.mobile-ops-settings .mobile-ops-secondary.danger { color: var(--clay); }
 
 .mobile-ops-nav { display: grid; min-height: 72px; grid-template-columns: repeat(4,1fr); padding: 8px 10px 10px; border-top: 1px solid var(--line); background: rgba(255,253,248,.96); }
 .mobile-ops-nav button { position: relative; display: grid; place-items: center; gap: 4px; border: 0; background: transparent; color: var(--muted); font-size: 9px; }
