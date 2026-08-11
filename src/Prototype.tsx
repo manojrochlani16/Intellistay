@@ -234,7 +234,7 @@ function findRoot(label: string) {
 }
 
 function AppMark({ compact = false }: { compact?: boolean }) {
-  return <div className={`app-mark ${compact ? "compact" : ""}`} aria-label="Intellistay"><span className="brand-symbol"><LightningBoltIcon /></span><span>Intellistay</span></div>;
+  return <div className={`app-mark ${compact ? "compact" : ""}`} aria-label="Intellistay"><span className="brand-symbol" aria-hidden="true"><HomeIcon /></span><span>Intellistay</span></div>;
 }
 
 function Field({ label, ...props }: React.ComponentProps<typeof KeyboardInput> & { label: string }) {
@@ -322,6 +322,9 @@ export default function Prototype() {
   useEffect(() => {
     keyboard.hide();
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    const deviceScreen = document.querySelector<HTMLElement>(".device-screen");
+    if (deviceScreen) deviceScreen.scrollTop = 0;
     const scroller = document.querySelector<HTMLElement>('[data-testid="mobile-scroll"]');
     if (scroller) scroller.scrollTop = 0;
   }, [view]);
@@ -376,6 +379,19 @@ export default function Prototype() {
   const changeView = (next: View) => {
     dismissKeyboard();
     setView(next);
+  };
+
+  const openOperationsPortal = () => {
+    dismissKeyboard();
+    window.location.assign("?surface=operations");
+  };
+
+  const exploreDemo = () => {
+    dismissKeyboard();
+    setGuest(reservations["AG-7K92"]);
+    setReceiptEmail("maya@example.com");
+    setView("home");
+    addNotice("Demo mode", "You can explore every guest tab without signing in.");
   };
 
   const addNotice = (title: string, body: string) => {
@@ -611,17 +627,20 @@ export default function Prototype() {
   </>;
 
   const renderAuth = () => <MobileScroll className="app-screen auth-scroll"><main className="auth-screen" data-testid="auth-screen">
-    <AppMark />
+    <header className="auth-entry-header"><AppMark /><button className="auth-operations-switch" onClick={openOperationsPortal}><DashboardIcon /><span>Hotel team</span><ChevronRightIcon /></button></header>
     <div className="auth-hero"><span className="eyebrow">Your stay, already in motion</span><h1>Welcome to a more thoughtful stay.</h1><p>Use a reservation, or continue as a guest with your name and one contact method.</p></div>
     <div className="segment-control" role="tablist" aria-label="Access method"><button role="tab" aria-selected={authMode === "reservation"} className={authMode === "reservation" ? "active" : ""} onClick={() => setAuthMode("reservation")}>Reservation</button><button role="tab" aria-selected={authMode === "guest"} className={authMode === "guest" ? "active" : ""} onClick={() => setAuthMode("guest")} data-testid="guest-access-tab">Guest access</button></div>
     {authMode === "reservation" ? <section className="access-form"><Field label="Reservation number" value={reservationCode} onChange={(event) => setReservationCode(event.target.value)} autoCapitalize="characters" data-testid="reservation-input" /><p className="field-help"><IdCardIcon /> Demo reservation: <button onClick={() => setReservationCode("AG-7K92")}>AG-7K92</button></p><div className="matched-stay"><span className="hotel-monogram">AG</span><span><strong>Aurora Grand</strong><small>Mumbai · Arrival 18:40</small></span><CheckCircledIcon /></div></section> : <section className="access-form"><Field label="Full name" value={guestName} onChange={(event) => setGuestName(event.target.value)} placeholder="Your name" /><div className="two-fields"><Field label="Phone" value={guestPhone} onChange={(event) => setGuestPhone(event.target.value)} placeholder="Optional" inputMode="tel" /><Field label="Email" value={guestEmail} onChange={(event) => setGuestEmail(event.target.value)} placeholder="Optional" inputMode="email" /></div>{renderHotelSearch(false)}</section>}
     {authError && <p className="form-error"><ExclamationTriangleIcon /> {authError}</p>}
     <button className="primary-button" onClick={login} data-testid="continue-button">Continue securely <ChevronRightIcon /></button>
+    <div className="auth-choice-divider"><span>or</span></div>
+    <button className="explore-demo-button" onClick={exploreDemo} data-testid="explore-demo"><span><HomeIcon /><strong>Explore the guest demo</strong><small>No email or reservation required</small></span><ChevronRightIcon /></button>
+    <button className="auth-staff-link" onClick={openOperationsPortal}><DashboardIcon /><span><strong>Switch to Hotel Operations</strong><small>Authorized hotel staff sign-in required</small></span><ChevronRightIcon /></button>
     <p className="privacy-note">Demo data stays in memory and resets on reload. Intellistay does not read files, contacts, photos, or device history.</p>
   </main></MobileScroll>;
 
   const renderHome = () => <main className="screen-content home-screen" data-testid="home-screen">
-    <header className="screen-header home-header"><AppMark compact /><div className="header-actions"><button className="icon-button notice-button" aria-label="Notifications" onClick={() => { setNotices((all) => all.map((item) => ({ ...item, read: true }))); setSheet("notifications"); }}><BellIcon />{unreadNotices && <i className="notification-dot" />}</button><button className="icon-button" aria-label="Profile" onClick={() => changeView("profile")}><PersonIcon /></button></div></header>
+    <header className="screen-header home-header"><AppMark compact /><div className="header-actions"><button className="icon-button staff-entry-button" aria-label="Switch to hotel operations" onClick={openOperationsPortal}><DashboardIcon /></button><button className="icon-button notice-button" aria-label="Notifications" onClick={() => { setNotices((all) => all.map((item) => ({ ...item, read: true }))); setSheet("notifications"); }}><BellIcon />{unreadNotices && <i className="notification-dot" />}</button><button className="icon-button" aria-label="Profile" onClick={() => changeView("profile")}><PersonIcon /></button></div></header>
     <section className="greeting"><p>Good evening,</p><h1>{firstName}.</h1><button className="stay-line stay-switch" onClick={() => setSheet("hotel")}><SewingPinIcon /><strong>{guest.hotel}</strong><span />Change hotel <ChevronRightIcon /></button></section>
     <section className="proactive-card"><div className="proactive-label"><span><LightningBoltIcon /></span> Proactive for you</div><h2>{proactiveCopy.title}</h2><p className="proactive-body">{proactiveCopy.body}</p><div className="progress-list"><div className="done"><CheckCircledIcon /><span><strong>Flight delay detected</strong><small>AI-624 · 42 minutes</small></span></div><div className="done"><CheckCircledIcon /><span><strong>Transfer updated</strong><small>New pickup 19:30</small></span></div><div className="current"><ClockIcon /><span><strong>Dinner protected</strong><small>20:00 at Terrace</small></span></div></div><button className="sand-button" onClick={() => proactiveCopy.root === "Airport Transfer" ? setSheet("review") : openService(proactiveCopy.root)}>{proactiveCopy.action} <ChevronRightIcon /></button><button className="outline-button light" onClick={() => changeView("concierge")}><ChatBubbleIcon /> Ask Intellistay</button></section>
     <button className="reservation-row" onClick={() => setSheet("checkout")}><span className="reservation-icon"><ReaderIcon /></span><span><small>Checkout & billing</small><strong>View invoice or itemized bill</strong></span><ChevronRightIcon /></button>
@@ -654,6 +673,7 @@ export default function Prototype() {
   const renderProfile = () => <main className="screen-content profile-screen" data-testid="profile-screen">
     <header className="profile-hero"><span className="profile-avatar">{guest.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span><h1>{guest.name}</h1><p>{guest.hotel} · #{guest.reservation}</p></header>
     <section className="profile-section"><span className="section-label">Stay & account</span><button onClick={() => setSheet("hotel")}><MagnifyingGlassIcon /><span><strong>Change participating hotel</strong><small>Search by hotel, city, region or pincode</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("checkout")}><FileTextIcon /><span><strong>Checkout & billing</strong><small>View, email or download both documents</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("notifications")}><BellIcon /><span><strong>Proactive notifications</strong><small>Push {pushEnabled ? "on" : "off"} · email {emailUpdates ? "on" : "off"}</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("feedback")}><HeartIcon /><span><strong>Share feedback</strong><small>Delivered to participating hotel operations</small></span><ChevronRightIcon /></button></section>
+    <section className="profile-section experience-switch-section"><span className="section-label">Switch experience</span><button onClick={openOperationsPortal}><DashboardIcon /><span><strong>Hotel Operations</strong><small>Opens the protected hotel-staff sign-in</small></span><ChevronRightIcon /></button></section>
     <section className="privacy-card"><CheckCircledIcon /><div><strong>Private demo mode</strong><p>No contacts, files, photos, location history, or device identifiers are read. Data resets on reload.</p></div></section>
     <button className="text-button" onClick={() => { setView("auth"); dismissKeyboard(); }}>Sign out of demo</button>
   </main>;
@@ -1002,6 +1022,7 @@ export function WebOperationsDashboard() {
   };
 
   if (!session) return <div className="ops-auth-surface">
+    <button className="ops-auth-guest-switch" onClick={() => window.location.assign("?screen=home")}><HomeIcon /><span>Guest app</span><ChevronRightIcon /></button>
     <aside className="ops-auth-story"><AppMark /><div><span className="eyebrow">Intellistay for hotel partners</span><h1>Turn every guest signal into a decisive next action.</h1><p>A private operations workspace for participating properties—connected to the guest concierge, never exposed inside it.</p></div><div className="ops-auth-proof"><span><CheckCircledIcon /> Property-scoped access</span><span><CheckCircledIcon /> Guest-to-team live routing</span><span><CheckCircledIcon /> Auditable AI recommendations</span></div></aside>
     <main className="ops-auth-main"><section className="ops-auth-card"><span className="section-label">Authorized partner workspace</span><h2>Hotel operations sign in</h2><p>We identify your participating property from its approved email domain or partnership login.</p><div className="ops-access-tabs" role="tablist" aria-label="Hotel operations access method"><button role="tab" aria-selected={accessMode === "email"} className={accessMode === "email" ? "active" : ""} onClick={() => { setAccessMode("email"); setAuthError(""); }}>Hotel email</button><button role="tab" aria-selected={accessMode === "partner"} className={accessMode === "partner" ? "active" : ""} onClick={() => { setAccessMode("partner"); setAuthError(""); }}>Partner login</button></div>{accessMode === "email" ? <label className="ops-auth-field"><span>Work email</span><input value={staffEmail} onChange={(event) => setStaffEmail(event.target.value)} type="email" aria-label="Hotel work email" /><small>Demo: manager@auroragrand.demo</small></label> : <><label className="ops-auth-field"><span>Participating hotel</span><select value={partnerHotel} onChange={(event) => setPartnerHotel(event.target.value)}>{hotels.map((item) => <option key={item.name}>{item.name}</option>)}</select></label><div className="ops-auth-two"><label className="ops-auth-field"><span>Partner ID</span><input value={partnerId} onChange={(event) => setPartnerId(event.target.value)} /></label><label className="ops-auth-field"><span>Access code</span><input value={accessCode} onChange={(event) => setAccessCode(event.target.value)} type="password" /><small>Demo: INTELLI-DEMO</small></label></div></>}{authError && <p className="ops-auth-error" role="alert"><ExclamationTriangleIcon />{authError}</p>}<button className="ops-auth-submit" onClick={authenticate}>Enter operations workspace <ChevronRightIcon /></button><p className="ops-auth-privacy"><CheckCircledIcon /> Demo verification only. Production access requires SSO, MFA, property roles, and server-enforced data isolation.</p></section></main>
   </div>;
@@ -1019,6 +1040,7 @@ export function WebOperationsDashboard() {
   const copy = pageCopy[activeSection];
 
   return <div className="web-ops-surface ops-v2">
+    <button className="ops-switch-guest" onClick={() => window.location.assign("?screen=home")}><HomeIcon /><span><strong>Guest app</strong><small>Switch experience</small></span><ChevronRightIcon /></button>
     <aside className="web-sidebar ops-sidebar"><AppMark /><div className="ops-property-lock"><span className="hotel-monogram">{hotel.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span><div><small>Authorized property</small><strong>{hotel.name}</strong><span>{hotel.city}, {hotel.country}</span></div><CheckCircledIcon /></div><nav aria-label="Hotel operations navigation">{operationsSections.map((section) => <button key={section} className={activeSection === section ? "active" : ""} aria-current={activeSection === section ? "page" : undefined} onClick={() => setActiveSection(section)}>{sectionIcon(section)}{section}{section === "Requests" && <span>{inProgress + dead}</span>}{section === "Feedback" && feedbackNeedsResponse > 0 && <span>{feedbackNeedsResponse}</span>}</button>)}</nav><div className="web-system-card"><span className="live-dot" /><div><strong>Guest integration live</strong><small>Property-scoped routing and policy controls active</small></div></div><div className="ops-staff-card"><span>{session.email.split("@")[0].slice(0, 2).toUpperCase()}</span><div><strong>{session.role}</strong><small>{session.email}</small></div><button onClick={signOut}>Sign out</button></div></aside>
 
     <main className="web-main ops-main"><header className="web-topbar ops-topbar"><div><span className="eyebrow">{copy.eyebrow}</span><h1>{copy.title}</h1><p>{copy.description}</p></div><div className="ops-top-actions"><button className="ops-action-secondary" onClick={emailWebReport}><EnvelopeClosedIcon /> Email report</button><button className="ops-action-primary" onClick={exportWebReport}><DownloadIcon /> Download</button><button className="ops-icon-button" aria-label="Operations notifications"><BellIcon /><i /></button></div></header>
