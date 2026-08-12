@@ -89,3 +89,11 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 - Fixed phone chrome should not animate with pushed screens. Screen content can animate; the status bar, camera cutout, and preview chrome should stay put.
 - Keep the keyboard below the home indicator/safe area layer in z-index, and above ordinary app UI while visible.
 - Keep the home indicator as the topmost safe-area layer in the z-index above everything else in the prototype.
+
+## Intellistay stay lifecycle decisions
+
+- Model the guest stay as a connected lifecycle: room selection, hotel-reviewed check-in, in-stay concierge, hotel-reviewed checkout, then billing. Store only demo lifecycle state in browser session storage so a same-browser guest and operations demonstration can synchronize across role changes.
+- Room inventory shown in the prototype is explicitly a demo snapshot. Production inventory and final room readiness must come from the participating hotel's PMS or CRS and require hotel confirmation before representing check-in as complete.
+- Location-aware recommendations require explicit one-time browser permission. The guest must also be able to continue with selected-hotel city context or a clearly labelled demo hotel location. Do not retain exact coordinates in the prototype.
+- Nearby discovery opens official Google Maps URL and Apple Map Links destinations in a new tab. State that hours, traffic, accessibility, and venue policies need current confirmation.
+- Preserve both architecture artifacts under `deliverables/`: an editable diagrams.net `.drawio` file and a matching presentation-ready `.svg`. Mark functional demo nodes separately from production integrations.
