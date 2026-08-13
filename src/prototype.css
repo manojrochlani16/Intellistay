@@ -331,6 +331,39 @@ button {
   padding-top: 22px;
 }
 
+.proactive-consent {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin: 14px 0;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--paper-strong);
+  cursor: pointer;
+}
+
+.proactive-consent.accepted {
+  border-color: rgba(127, 155, 140, .55);
+  background: rgba(168, 183, 160, .15);
+}
+
+.proactive-consent input {
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--forest);
+}
+
+.proactive-consent > span {
+  display: grid;
+  gap: 4px;
+}
+
+.proactive-consent strong { color: var(--forest); font-size: 10px; }
+.proactive-consent small { color: var(--muted); font-size: 8px; line-height: 1.45; }
+
 .field,
 .search-field {
   display: grid;
@@ -866,18 +899,6 @@ button {
 
 .bottom-nav button.active {
   color: var(--forest);
-  font-weight: 600;
-}
-
-.credit-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 8px 10px;
-  border-radius: 999px;
-  background: rgba(168, 183, 160, 0.24);
-  color: var(--forest);
-  font-size: 10px;
   font-weight: 600;
 }
 
@@ -1699,14 +1720,18 @@ button {
   font-size: 8px;
 }
 
-.credit-pill {
-  border: 1px solid rgba(93, 115, 82, 0.22);
-  cursor: pointer;
-}
-
-.credit-pill svg:last-child {
-  width: 11px;
-  height: 11px;
+.ai-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border-radius: 999px;
+  background: rgba(168, 183, 160, .2);
+  color: var(--forest);
+  font-size: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .08em;
 }
 
 .service-browser .special-list {
@@ -1759,8 +1784,7 @@ button {
 }
 
 .selection-explainer,
-.notification-consent,
-.credits-sheet > p {
+.notification-consent {
   margin: 0;
   color: var(--muted);
   font-size: 10px;
@@ -1799,62 +1823,6 @@ button {
 
 .bill-tabs {
   margin: 0;
-}
-
-.credit-balance {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  padding: 16px;
-  border-radius: 16px;
-  background: var(--forest);
-  color: var(--paper);
-}
-
-.credit-balance > svg {
-  width: 26px;
-  height: 26px;
-  color: var(--sand);
-}
-
-.credit-balance div {
-  display: grid;
-  gap: 2px;
-}
-
-.credit-balance small {
-  color: rgba(250, 247, 238, .7);
-  font-size: 8px;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-}
-
-.credit-balance strong {
-  font-family: var(--serif);
-  font-size: 22px;
-}
-
-.usage-list {
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 13px;
-}
-
-.usage-list div {
-  display: flex;
-  justify-content: space-between;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 9px;
-}
-
-.usage-list div:last-child {
-  border-bottom: 0;
-}
-
-.usage-list strong {
-  color: var(--clay);
 }
 
 .notification-setting {
@@ -1917,13 +1885,17 @@ button {
   gap: 8px;
 }
 
-.notice-list article {
+.notice-list article,
+.notice-list > button {
   display: grid;
+  width: 100%;
   grid-template-columns: auto 1fr;
   gap: 9px;
   padding: 11px;
   border: 1px solid var(--line);
   border-radius: 12px;
+  background: var(--paper-strong);
+  text-align: left;
 }
 
 .notice-list .live-dot {
@@ -1941,6 +1913,10 @@ button {
   font-size: 8px;
   line-height: 1.4;
 }
+
+.notice-list > button > span:last-child { display: grid; }
+.notice-list > button small { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; color: var(--forest); font-size: 8px; font-weight: 600; }
+.notice-list > button small svg { width: 12px; height: 12px; }
 
 .ops-metrics {
   grid-template-columns: repeat(4, 1fr);
@@ -3308,6 +3284,7 @@ button {
 .stay-ai-prompt p { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .room-inventory { display: grid; gap: 12px; }
 .room-card { overflow: hidden; padding: 0 0 13px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper-strong); text-align: left; }
+.room-card.unavailable { opacity: .55; filter: grayscale(.35); }
 .room-photo { display: block; width: 100%; height: 132px; background-image: url('/intellistay-room-triptych.png'); background-repeat: no-repeat; background-size: 300% 100%; }
 .room-photo.left { background-position: left center; }
 .room-photo.center { background-position: center center; }
@@ -3319,6 +3296,12 @@ button {
 .room-card-copy em { color: var(--forest); font-size: 9px; font-style: normal; font-weight: 600; }
 .room-card-features { display: block; padding: 8px 13px 0; color: var(--muted); font-size: 9px; }
 .room-accessible { display: inline-flex; align-items: center; gap: 5px; margin: 9px 13px 0; padding: 5px 8px; border-radius: 999px; background: rgba(168,183,160,.25); color: var(--forest); font-size: 8px; font-weight: 600; }
+.no-room-state { display: grid; justify-items: center; padding: 20px 14px; border: 1px solid rgba(185,111,82,.28); border-radius: 18px; background: rgba(185,111,82,.08); text-align: center; }
+.no-room-state > span { display: grid; width: 44px; height: 44px; place-items: center; border-radius: 50%; background: var(--clay); color: var(--paper); }
+.no-room-state h2 { margin-top: 12px; font-size: 24px; line-height: 1.05; }
+.no-room-state p { margin-top: 8px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.no-room-state a { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; margin-top: 14px; padding: 0 14px; border-radius: 12px; background: var(--forest); color: var(--paper); font-size: 10px; font-weight: 600; text-decoration: none; }
+.no-room-state small { margin-top: 8px; color: var(--muted); font-size: 7px; }
 .room-detail-photo { height: 190px; border-radius: 18px; }
 .room-detail-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
 .room-detail-heading h2 { margin-top: 2px; font-size: 29px; line-height: 1; }
@@ -3370,6 +3353,13 @@ button {
 .map-actions { display: flex; gap: 7px; margin-top: 12px; }
 .map-actions a { display: inline-flex; min-height: 34px; flex: 1; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 10px; color: var(--forest); font-size: 8px; font-weight: 600; text-decoration: none; }
 .map-actions a:first-child { border-color: var(--forest); background: var(--forest); color: var(--paper); }
+
+.proactive-service-prompt { justify-items: center; text-align: center; }
+.prompt-orb { display: grid; width: 58px; height: 58px; place-items: center; border-radius: 50%; background: var(--forest); color: var(--sand); box-shadow: 0 12px 30px rgba(21,59,50,.2); }
+.prompt-orb svg { width: 24px; height: 24px; }
+.proactive-service-prompt h2 { max-width: 280px; font-size: 30px; line-height: 1.02; }
+.proactive-service-prompt > p { max-width: 290px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.proactive-service-prompt > small { color: var(--muted); font-size: 8px; }
 
 @media (max-width: 600px) {
   .phone-stage { padding: 0 !important; }

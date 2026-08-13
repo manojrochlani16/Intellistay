@@ -25,6 +25,7 @@ import {
   IdCardIcon,
   LightningBoltIcon,
   MagnifyingGlassIcon,
+  MobileIcon,
   PaperPlaneIcon,
   PersonIcon,
   PlusIcon,
@@ -42,6 +43,7 @@ type Hotel = {
   country: string;
   pincode: string;
   opsEmail: string;
+  frontDeskPhone: string;
 };
 
 type Guest = {
@@ -51,6 +53,8 @@ type Guest = {
   arrival: string;
   room?: string;
   contact?: string;
+  roomType: "King" | "Suite" | "Twin";
+  guests: number;
 };
 
 type TicketStatus = "New" | "In progress" | "Dead" | "Resolved" | "Closed" | "N/A / Invalid";
@@ -93,7 +97,11 @@ type Notice = {
   title: string;
   body: string;
   read: boolean;
+  action?: ProactiveAction;
 };
+
+type ProactiveAction = { kind: "stay" } | { kind: "nearby" } | { kind: "service"; root: string; leaf?: string };
+type ProactivePrompt = { title: string; body: string; actionLabel: string; action: ProactiveAction };
 
 type DemoSyncEvent =
   | { type: "ticket-created"; ticket: Ticket }
@@ -103,7 +111,7 @@ type DemoSyncEvent =
   | { type: "feedback-response"; feedbackId: string; response: string; recipient: string };
 
 type View = "auth" | "home" | "concierge" | "requests" | "profile";
-type Sheet = "review" | "service" | "ticket" | "feedback" | "checkout" | "credits" | "notifications" | "hotel" | "stay" | "nearby" | null;
+type Sheet = "review" | "service" | "ticket" | "feedback" | "checkout" | "notifications" | "hotel" | "stay" | "nearby" | "prompt" | null;
 type StayStage = "pre-arrival" | "check-in-requested" | "checked-in" | "checkout-requested" | "checked-out";
 type StayFlowStep = "rooms" | "room-detail" | "checkin" | "checkin-pending" | "checkout" | "checkout-pending";
 type LocationState = "off" | "checking" | "at-hotel" | "nearby" | "denied" | "unavailable";
@@ -119,6 +127,8 @@ type RoomOption = {
   feature: string;
   position: "left" | "center" | "right";
   accessible?: boolean;
+  roomType: "King" | "Suite" | "Twin";
+  capacity: number;
 };
 
 type NearbyPlace = {
@@ -129,9 +139,10 @@ type NearbyPlace = {
 };
 
 const roomInventory: RoomOption[] = [
-  { id: "1208", name: "City King", bed: "1 king bed", size: "36 m²", view: "Skyline view", floor: "12th floor", upgrade: "Included", feature: "Quiet high-floor room with a window lounge and rainfall shower.", position: "left" },
-  { id: "807", name: "Garden Suite", bed: "1 king bed", size: "52 m²", view: "Courtyard garden", floor: "8th floor", upgrade: "+₹3,500", feature: "Separate living area, deep soaking bath, and sheltered garden outlook.", position: "center" },
-  { id: "614", name: "Accessible Grand", bed: "1 king bed", size: "42 m²", view: "City garden view", floor: "6th floor", upgrade: "Included", feature: "Wide circulation, roll-in shower, lowered controls, and step-free route.", position: "right", accessible: true },
+  { id: "1208", name: "City King", bed: "1 king bed", size: "36 m²", view: "Skyline view", floor: "12th floor", upgrade: "Included", feature: "Quiet high-floor room with a window lounge and rainfall shower.", position: "left", roomType: "King", capacity: 2 },
+  { id: "1211", name: "City King", bed: "1 king bed", size: "36 m²", view: "Harbour view", floor: "12th floor", upgrade: "Included", feature: "High-floor king room with a harbour outlook, lounge chair, and rainfall shower.", position: "left", roomType: "King", capacity: 2 },
+  { id: "807", name: "Garden Suite", bed: "1 king bed + sofa", size: "52 m²", view: "Courtyard garden", floor: "8th floor", upgrade: "Included", feature: "Separate living area, deep soaking bath, and sheltered garden outlook.", position: "center", roomType: "Suite", capacity: 3 },
+  { id: "614", name: "Accessible Grand", bed: "1 king bed", size: "42 m²", view: "City garden view", floor: "6th floor", upgrade: "Included", feature: "Wide circulation, roll-in shower, lowered controls, and step-free route.", position: "right", accessible: true, roomType: "King", capacity: 2 },
 ];
 
 const nearbyByCity: Record<string, NearbyPlace[]> = {
@@ -160,32 +171,43 @@ const nearbyByCity: Record<string, NearbyPlace[]> = {
   ],
 };
 
+const proactivePromptDeck: ProactivePrompt[] = [
+  { title: "Your mobile check-in is ready", body: "Choose an available room matching your reservation and complete check-in now.", actionLabel: "Check in now", action: { kind: "stay" } },
+  { title: "Would arrival assistance help?", body: "I can arrange wheelchair assistance and notify the concierge before you reach the lobby.", actionLabel: "Review wheelchair assistance", action: { kind: "service", root: "Wheelchair", leaf: "Wheelchair assistance" } },
+  { title: "Plan dinner around your stay", body: "Browse hotel dining and ask the team to hold a suitable table.", actionLabel: "Browse dining", action: { kind: "service", root: "Dining & Reservations" } },
+  { title: "Prepare your room comfort", body: "Request towels, cleaning, bedding, minibar, or an AC comfort check.", actionLabel: "Open room services", action: { kind: "service", root: "Housekeeping & Maintenance" } },
+  { title: "Explore what is nearby", body: "See sightseeing, restaurants, parks, beaches, culture, and nightlife around your hotel.", actionLabel: "Explore nearby", action: { kind: "nearby" } },
+  { title: "Need an airport transfer?", body: "Arrange a hotel or airport cab and keep the request tracked in the app.", actionLabel: "Open airport transfer", action: { kind: "service", root: "Airport Transfer" } },
+];
+
 const hotels: Hotel[] = [
-  { name: "Aurora Grand", city: "Mumbai", state: "Maharashtra", country: "India", pincode: "400001", opsEmail: "guestcare@auroragrand.demo" },
-  { name: "Cove House", city: "Goa", state: "Goa", country: "India", pincode: "403001", opsEmail: "guestcare@covehouse.demo" },
-  { name: "The Meridian", city: "Bengaluru", state: "Karnataka", country: "India", pincode: "560001", opsEmail: "experience@themeridian.demo" },
-  { name: "Aravali House", city: "Udaipur", state: "Rajasthan", country: "India", pincode: "313001", opsEmail: "stay@aravalihouse.demo" },
-  { name: "Monsoon Atelier", city: "Kochi", state: "Kerala", country: "India", pincode: "682001", opsEmail: "care@monsoonatelier.demo" },
-  { name: "Saffron Courtyard", city: "Jaipur", state: "Rajasthan", country: "India", pincode: "302001", opsEmail: "guestcare@saffroncourtyard.demo" },
-  { name: "The Cedar Reserve", city: "Shimla", state: "Himachal Pradesh", country: "India", pincode: "171001", opsEmail: "concierge@cedarreserve.demo" },
-  { name: "Bayline Retreat", city: "Chennai", state: "Tamil Nadu", country: "India", pincode: "600001", opsEmail: "care@baylineretreat.demo" },
-  { name: "The Imperial Grove", city: "Delhi", state: "Delhi", country: "India", pincode: "110001", opsEmail: "guestrelations@imperialgrove.demo" },
-  { name: "Lotus Quay", city: "Kolkata", state: "West Bengal", country: "India", pincode: "700001", opsEmail: "stay@lotusquay.demo" },
-  { name: "Deccan House", city: "Hyderabad", state: "Telangana", country: "India", pincode: "500001", opsEmail: "care@deccanhouse.demo" },
-  { name: "Nila Heritage", city: "Puducherry", state: "Puducherry", country: "India", pincode: "605001", opsEmail: "guestcare@nilaheritage.demo" },
-  { name: "Riverstone Lodge", city: "Rishikesh", state: "Uttarakhand", country: "India", pincode: "249201", opsEmail: "concierge@riverstonelodge.demo" },
-  { name: "The Palm Annex", city: "Dubai", state: "Dubai", country: "UAE", pincode: "00000", opsEmail: "experience@palmannex.demo" },
-  { name: "Harbour No. 8", city: "Singapore", state: "Singapore", country: "Singapore", pincode: "018956", opsEmail: "stay@harbour8.demo" },
+  { name: "Aurora Grand", city: "Mumbai", state: "Maharashtra", country: "India", pincode: "400001", opsEmail: "guestcare@auroragrand.demo", frontDeskPhone: "+91 22 5550 1200" },
+  { name: "Cove House", city: "Goa", state: "Goa", country: "India", pincode: "403001", opsEmail: "guestcare@covehouse.demo", frontDeskPhone: "+91 832 555 0408" },
+  { name: "The Meridian", city: "Bengaluru", state: "Karnataka", country: "India", pincode: "560001", opsEmail: "experience@themeridian.demo", frontDeskPhone: "+91 80 5550 0905" },
+  { name: "Aravali House", city: "Udaipur", state: "Rajasthan", country: "India", pincode: "313001", opsEmail: "stay@aravalihouse.demo", frontDeskPhone: "+91 294 555 0101" },
+  { name: "Monsoon Atelier", city: "Kochi", state: "Kerala", country: "India", pincode: "682001", opsEmail: "care@monsoonatelier.demo", frontDeskPhone: "+91 484 555 0202" },
+  { name: "Saffron Courtyard", city: "Jaipur", state: "Rajasthan", country: "India", pincode: "302001", opsEmail: "guestcare@saffroncourtyard.demo", frontDeskPhone: "+91 141 555 0303" },
+  { name: "The Cedar Reserve", city: "Shimla", state: "Himachal Pradesh", country: "India", pincode: "171001", opsEmail: "concierge@cedarreserve.demo", frontDeskPhone: "+91 177 555 0404" },
+  { name: "Bayline Retreat", city: "Chennai", state: "Tamil Nadu", country: "India", pincode: "600001", opsEmail: "care@baylineretreat.demo", frontDeskPhone: "+91 44 5550 0505" },
+  { name: "The Imperial Grove", city: "Delhi", state: "Delhi", country: "India", pincode: "110001", opsEmail: "guestrelations@imperialgrove.demo", frontDeskPhone: "+91 11 5550 0606" },
+  { name: "Lotus Quay", city: "Kolkata", state: "West Bengal", country: "India", pincode: "700001", opsEmail: "stay@lotusquay.demo", frontDeskPhone: "+91 33 5550 0707" },
+  { name: "Deccan House", city: "Hyderabad", state: "Telangana", country: "India", pincode: "500001", opsEmail: "care@deccanhouse.demo", frontDeskPhone: "+91 40 5550 0808" },
+  { name: "Nila Heritage", city: "Puducherry", state: "Puducherry", country: "India", pincode: "605001", opsEmail: "guestcare@nilaheritage.demo", frontDeskPhone: "+91 413 555 0909" },
+  { name: "Riverstone Lodge", city: "Rishikesh", state: "Uttarakhand", country: "India", pincode: "249201", opsEmail: "concierge@riverstonelodge.demo", frontDeskPhone: "+91 135 555 1010" },
+  { name: "The Palm Annex", city: "Dubai", state: "Dubai", country: "UAE", pincode: "00000", opsEmail: "experience@palmannex.demo", frontDeskPhone: "+971 4 555 1111" },
+  { name: "Harbour No. 8", city: "Singapore", state: "Singapore", country: "Singapore", pincode: "018956", opsEmail: "stay@harbour8.demo", frontDeskPhone: "+65 6555 1212" },
 ];
 
 const reservations: Record<string, Guest> = {
-  "AG-7K92": { name: "Maya Kapoor", hotel: "Aurora Grand", reservation: "AG-7K92", arrival: "18:40", room: "1208", contact: "maya@example.com" },
-  "CH-2048": { name: "Arjun Mehta", hotel: "Cove House", reservation: "CH-2048", arrival: "16:20", room: "408", contact: "+91 98765 43210" },
-  "TM-8841": { name: "Rhea Shah", hotel: "The Meridian", reservation: "TM-8841", arrival: "20:10", room: "905", contact: "rhea@example.com" },
+  "AG-7K92": { name: "Maya Kapoor", hotel: "Aurora Grand", reservation: "AG-7K92", arrival: "18:40", room: "1208", contact: "maya@example.com", roomType: "King", guests: 2 },
+  "AG-FULL": { name: "Neha Bose", hotel: "Aurora Grand", reservation: "AG-FULL", arrival: "19:10", contact: "neha@example.com", roomType: "Twin", guests: 2 },
+  "CH-2048": { name: "Arjun Mehta", hotel: "Cove House", reservation: "CH-2048", arrival: "16:20", room: "807", contact: "+91 98765 43210", roomType: "Suite", guests: 3 },
+  "TM-8841": { name: "Rhea Shah", hotel: "The Meridian", reservation: "TM-8841", arrival: "20:10", room: "1211", contact: "rhea@example.com", roomType: "King", guests: 2 },
 };
 
 const reservationContacts: Record<string, { email: string; phone: string }> = {
   "AG-7K92": { email: "maya@example.com", phone: "+91 98765 43210" },
+  "AG-FULL": { email: "neha@example.com", phone: "+91 98999 11122" },
   "CH-2048": { email: "arjun@example.com", phone: "+91 98111 22334" },
   "TM-8841": { email: "rhea@example.com", phone: "+91 98222 33445" },
 };
@@ -283,6 +305,7 @@ const reportPeriods = ["Daily", "Weekly", "Monthly", "Quarterly"] as const;
 type ReportPeriod = typeof reportPeriods[number];
 const demoChannelName = "intellistay-live-demo";
 const demoStayStorageKey = "intellistay-stay-lifecycle-demo";
+const demoInventoryStorageKey = "intellistay-room-inventory-demo-v1";
 
 type DemoStaySession = { reservation: string; hotel: string; stage: StayStage; roomId?: string; checkInTime?: string; checkOutTime?: string; ticket?: Ticket };
 
@@ -298,8 +321,21 @@ function statusClass(status: TicketStatus) {
   return status.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-function estimateCredits(text: string) {
-  return Math.max(4, Math.ceil(text.length / 4) * 2);
+type DemoInventory = Record<string, { reservation: string; guest: string; checkedInAt: string }>;
+
+function inventoryKey(hotel: string, roomId: string) { return `${hotel}::${roomId}`; }
+function readDemoInventory(): DemoInventory {
+  try { return JSON.parse(window.localStorage.getItem(demoInventoryStorageKey) || "{}") as DemoInventory; } catch { return {}; }
+}
+function occupyDemoRoom(hotel: string, roomId: string, reservation: string, guest: string) {
+  const inventory = readDemoInventory();
+  inventory[inventoryKey(hotel, roomId)] = { reservation, guest, checkedInAt: new Date().toISOString() };
+  window.localStorage.setItem(demoInventoryStorageKey, JSON.stringify(inventory));
+}
+function releaseDemoRoom(hotel: string, roomId: string) {
+  const inventory = readDemoInventory();
+  delete inventory[inventoryKey(hotel, roomId)];
+  window.localStorage.setItem(demoInventoryStorageKey, JSON.stringify(inventory));
 }
 
 function findRoot(label: string) {
@@ -360,8 +396,6 @@ export default function Prototype() {
   const [chatInput, setChatInput] = useState("");
   const [messages, setMessages] = useState([{ from: "ai", text: "I’m tracking your arrival. Your transfer and dinner are aligned with the updated flight time. Ask me to book, change, dispatch, or explain anything about your stay." }]);
   const [chatBusy, setChatBusy] = useState(false);
-  const [credits, setCredits] = useState(1200);
-  const [creditUsage, setCreditUsage] = useState<{ label: string; amount: number }[]>([{ label: "Arrival planning", amount: 84 }]);
   const [billView, setBillView] = useState<"Invoice" | "Itemized Bill">("Invoice");
   const [receiptEmail, setReceiptEmail] = useState(guest.contact?.includes("@") ? guest.contact : "");
   const [pushEnabled, setPushEnabled] = useState(false);
@@ -374,11 +408,18 @@ export default function Prototype() {
   const [checkOutTime, setCheckOutTime] = useState("12:00");
   const [locationState, setLocationState] = useState<LocationState>("off");
   const [nearbyCategory, setNearbyCategory] = useState("All");
+  const [proactiveConsent, setProactiveConsent] = useState(false);
+  const [proactivePrompt, setProactivePrompt] = useState<ProactivePrompt | null>(null);
+  const [promptIndex, setPromptIndex] = useState(0);
+  const [inventoryRevision, setInventoryRevision] = useState(0);
   const [notices, setNotices] = useState<Notice[]>([
-    { id: 1, title: "Transfer adjusted", body: "Your driver now expects you at 19:30.", read: false },
-    { id: 2, title: "Rain tomorrow", body: "An indoor spa cabana is available from 11:00.", read: false },
+    { id: 1, title: "Transfer adjusted", body: "Your driver now expects you at 19:30.", read: false, action: { kind: "service", root: "Airport Transfer" } },
+    { id: 3, title: "Arrival assistance available", body: "Would you like wheelchair assistance arranged for arrival?", read: false, action: { kind: "service", root: "Wheelchair", leaf: "Wheelchair assistance" } },
+    { id: 2, title: "Rain tomorrow", body: "An indoor spa cabana is available from 11:00.", read: false, action: { kind: "nearby" } },
   ]);
   const demoChannel = useRef<BroadcastChannel | null>(null);
+  const sheetRef = useRef<Sheet>(null);
+  const promptIndexRef = useRef(0);
 
   const firstName = guest.name.split(" ")[0] || "Guest";
   const currentHotel = hotels.find((hotel) => hotel.name === guest.hotel) ?? hotels[0];
@@ -390,6 +431,14 @@ export default function Prototype() {
     { name: `Nightlife in ${currentHotel.city}`, category: "Nightlife" as const, plan: `Browse bars, clubs, and evening entertainment.`, travelMode: "driving" as const },
   ];
   const visibleNearby = nearbyCategory === "All" ? nearbyPlaces : nearbyPlaces.filter((place) => place.category === nearbyCategory);
+  const demoInventory = readDemoInventory();
+  const eligibleRooms = roomInventory.filter((room) => room.roomType === guest.roomType && room.capacity >= guest.guests);
+  const roomIsAvailable = (room: RoomOption) => {
+    const occupant = demoInventory[inventoryKey(guest.hotel, room.id)];
+    return !occupant || occupant.reservation === guest.reservation;
+  };
+  const availableRooms = eligibleRooms.filter(roomIsAvailable);
+  void inventoryRevision;
   const unreadNotices = notices.some((notice) => !notice.read);
   const selectedTicket = tickets.find((ticket) => ticket.id === selectedTicketId) ?? tickets[0];
   const currentServiceNodes = servicePath.length ? servicePath[servicePath.length - 1].children ?? [] : serviceCatalog;
@@ -479,17 +528,48 @@ export default function Prototype() {
 
   const openOperationsPortal = () => {
     dismissKeyboard();
-    window.location.assign("?surface=operations&display=mobile&reauth=1");
+    const operationsUrl = new URL(window.location.href);
+    operationsUrl.search = "?surface=operations&display=mobile&reauth=1";
+    window.location.href = operationsUrl.toString();
   };
 
-  const addNotice = (title: string, body: string) => {
-    setNotices((current) => [{ id: Date.now(), title, body, read: false }, ...current]);
+  const addNotice = (title: string, body: string, action?: ProactiveAction) => {
+    setNotices((current) => [{ id: Date.now(), title, body, read: false, action }, ...current]);
     if (pushEnabled && "Notification" in window && Notification.permission === "granted") new Notification(title, { body });
+  };
+
+  const openServiceDestination = (rootLabel: string, leafLabel?: string) => {
+    const root = findRoot(rootLabel);
+    if (!root) return;
+    dismissKeyboard();
+    setServicePath([root]);
+    setRequestDetail("");
+    const leaf = leafLabel ? root.children?.find((node) => node.label === leafLabel) : undefined;
+    setSelectedService(leaf ?? null);
+    setInterests((current) => [...current.filter((item) => item !== (leaf?.label ?? rootLabel)), leaf?.label ?? rootLabel]);
+    setSheet("service");
+  };
+
+  const handleProactiveAction = (action: ProactiveAction) => {
+    setProactivePrompt(null);
+    if (action.kind === "stay") return openStayFlow("rooms");
+    if (action.kind === "nearby") return openNearby();
+    openServiceDestination(action.root, action.leaf);
+  };
+
+  const showProactivePrompt = (index: number) => {
+    const prompt = proactivePromptDeck[index % proactivePromptDeck.length];
+    promptIndexRef.current = index % proactivePromptDeck.length;
+    setPromptIndex(index % proactivePromptDeck.length);
+    setProactivePrompt(prompt);
+    addNotice(prompt.title, prompt.body, prompt.action);
+    setSheet("prompt");
   };
 
   const login = () => {
     dismissKeyboard();
     setAuthError("");
+    if (!proactiveConsent) return setAuthError("Confirm proactive stay assistance before continuing. You can turn it off later in Profile.");
     if (!selectedHotel) return setAuthError("Select a participating Intellistay hotel before continuing.");
     const code = reservationCode.trim().toUpperCase();
     const directMatch = reservations[code];
@@ -513,7 +593,7 @@ export default function Prototype() {
     setGuest(match);
     const savedStay = readDemoStaySession();
     const resumeStay = savedStay?.reservation === match.reservation && savedStay.hotel === match.hotel ? savedStay : null;
-    setStayStage(resumeStay?.stage ?? "pre-arrival");
+    setStayStage(resumeStay?.stage === "check-in-requested" ? "pre-arrival" : resumeStay?.stage ?? "pre-arrival");
     setSelectedRoom(roomInventory.find((room) => room.id === resumeStay?.roomId) ?? null);
     setCheckInTime(resumeStay?.checkInTime ?? match.arrival);
     setCheckOutTime(resumeStay?.checkOutTime ?? "12:00");
@@ -522,6 +602,7 @@ export default function Prototype() {
     setReceiptEmail(reservationContacts[match.reservation]?.email ?? (match.contact?.includes("@") ? match.contact : ""));
     setView("home");
     notify(`Welcome back, ${match.name.split(" ")[0]}.`);
+    window.setTimeout(() => showProactivePrompt(resumeStay?.stage === "checked-in" ? 2 : 0), 350);
   };
 
   const openService = (rootLabel?: string) => {
@@ -548,13 +629,24 @@ export default function Prototype() {
 
   const submitCheckIn = () => {
     if (!selectedRoom) return notify("Select an available room first.");
-    const id = raiseTicket(`Mobile check-in · Room ${selectedRoom.id}`, "Front Desk", `Guest selected ${selectedRoom.name}, room ${selectedRoom.id}, and expects to arrive at ${checkInTime}. Verify inventory, prepare the room, and confirm check-in.`, "High");
-    const ticket: Ticket = { id, title: `Mobile check-in · Room ${selectedRoom.id}`, detail: `Guest selected ${selectedRoom.name}, room ${selectedRoom.id}, and expects to arrive at ${checkInTime}. Verify inventory, prepare the room, and confirm check-in.`, department: "Front Desk", status: "New", priority: "High", minutesOpen: 0, comments: [] };
-    writeDemoStaySession({ reservation: guest.reservation, hotel: guest.hotel, stage: "check-in-requested", roomId: selectedRoom.id, checkInTime, checkOutTime, ticket });
-    setStayStage("check-in-requested");
+    const occupant = readDemoInventory()[inventoryKey(guest.hotel, selectedRoom.id)];
+    if (occupant && occupant.reservation !== guest.reservation) {
+      setInventoryRevision((value) => value + 1);
+      setSelectedRoom(null);
+      setStayFlow(["rooms"]);
+      return notify("That room was just booked. Choose another available room or call Front Desk.");
+    }
+    occupyDemoRoom(guest.hotel, selectedRoom.id, guest.reservation, guest.name);
+    setInventoryRevision((value) => value + 1);
+    const title = `Mobile check-in complete · Room ${selectedRoom.id}`;
+    const detail = `${guest.name} completed mobile check-in for ${selectedRoom.name}, room ${selectedRoom.id}, at ${checkInTime}. Inventory is now occupied and Front Desk has been notified.`;
+    const id = raiseTicket(title, "Front Desk", detail, "High", "Resolved");
+    const ticket: Ticket = { id, title, detail, department: "Front Desk", status: "Resolved", priority: "High", minutesOpen: 0, comments: ["Guest check-in completed from available inventory."] };
+    writeDemoStaySession({ reservation: guest.reservation, hotel: guest.hotel, stage: "checked-in", roomId: selectedRoom.id, checkInTime, checkOutTime, ticket });
+    setStayStage("checked-in");
     pushStayStep("checkin-pending");
     setInterests((current) => [...current.filter((item) => item !== "Mobile check-in"), "Mobile check-in"]);
-    addNotice("Check-in sent to the hotel", `${id} is waiting for Front Desk room confirmation.`);
+    addNotice("Check-in successful", `You are checked in to room ${selectedRoom.id}. Hotel operations received ${id}.`, { kind: "service", root: "Dining & Reservations" });
   };
 
   const submitCheckout = () => {
@@ -572,6 +664,17 @@ export default function Prototype() {
     setNearbyCategory("All");
     setSheet("nearby");
   };
+
+  useEffect(() => { sheetRef.current = sheet; }, [sheet]);
+
+  useEffect(() => {
+    if (view === "auth" || !proactiveConsent || stayStage === "checked-out") return;
+    const hourlyPrompt = window.setInterval(() => {
+      if (sheetRef.current) return;
+      showProactivePrompt((promptIndexRef.current + 1) % proactivePromptDeck.length);
+    }, 60 * 60 * 1000);
+    return () => window.clearInterval(hourlyPrompt);
+  }, [view, proactiveConsent, guest.hotel, stayStage]);
 
   const useDemoHotelLocation = () => {
     setLocationState("at-hotel");
@@ -619,9 +722,9 @@ export default function Prototype() {
     setSelectedService(node);
   };
 
-  const raiseTicket = (title: string, department: Department, detail: string, priority: "Standard" | "High" = "Standard") => {
+  const raiseTicket = (title: string, department: Department, detail: string, priority: "Standard" | "High" = "Standard", status: TicketStatus = "New") => {
     const id = `IST-${2410 + tickets.length}`;
-    const ticket: Ticket = { id, title, detail, department, status: "New", priority, minutesOpen: 0, comments: [] };
+    const ticket: Ticket = { id, title, detail, department, status, priority, minutesOpen: 0, comments: status === "Resolved" ? ["Completed automatically from available inventory."] : [] };
     setTickets((current) => [ticket, ...current]);
     demoChannel.current?.postMessage({ type: "ticket-created", ticket } satisfies DemoSyncEvent);
     setSelectedTicketId(id);
@@ -652,8 +755,8 @@ export default function Prototype() {
       return "That looks outside the hotel and travel services I can safely action, so I did not create a ticket. The live-AI connection can answer broader questions when enabled; this demo keeps autonomous actions limited to your stay.";
     }
     if (/check.?in|select.*room|choose.*room|room.*available|room.*view|arrival time/.test(lower)) {
-      openStayFlow(stayStage === "check-in-requested" ? "checkin-pending" : "rooms");
-      return stayStage === "check-in-requested" ? "Your mobile check-in is already with Front Desk. I opened its live confirmation state; the hotel can adjust the room if inventory changes." : `I opened the available-room step for ${guest.hotel}. Choose a room, review its features, and confirm your ${guest.arrival} arrival time before I route check-in to Front Desk.`;
+      openStayFlow(stayStage === "checked-in" ? "checkin-pending" : "rooms");
+      return stayStage === "checked-in" ? `You are already checked in to room ${selectedRoom?.id ?? guest.room}. I opened your confirmed stay state.` : `I opened rooms matching your ${guest.roomType.toLowerCase()} reservation for ${guest.guests} guests. Choose an available room and complete check-in immediately; hotel operations will receive the inventory update.`;
     }
     if (/check.?out|departure time|leave.*hotel/.test(lower) && !/invoice|itemized|bill|receipt/.test(lower)) {
       openStayFlow(stayStage === "checkout-requested" ? "checkout-pending" : "checkout");
@@ -742,9 +845,6 @@ export default function Prototype() {
       }
     }
     if (!response) response = localOrchestration(prompt);
-    const used = estimateCredits(prompt + response);
-    setCredits((current) => Math.max(0, current - used));
-    setCreditUsage((current) => [{ label: prompt.slice(0, 28), amount: used }, ...current].slice(0, 6));
     window.setTimeout(() => {
       setMessages((current) => [...current, { from: "ai", text: response }]);
       setChatBusy(false);
@@ -829,9 +929,10 @@ export default function Prototype() {
     <header className="auth-entry-header"><AppMark /><button className="auth-operations-switch" onClick={openOperationsPortal}><DashboardIcon /><span>Hotel team</span><ChevronRightIcon /></button></header>
     <div className="auth-hero"><span className="eyebrow">Your stay, already in motion</span><h1>Find your stay.</h1><p>Select the participating hotel first. We verify the reservation against that property before opening the guest experience.</p></div>
     <section className="access-form">{renderAuthHotelPicker()}<Field label="Reservation number" value={reservationCode} onChange={(event) => { setReservationCode(event.target.value); setAuthError(""); }} autoCapitalize="characters" data-testid="reservation-input" /><p className="field-help"><IdCardIcon /> Demo: Aurora Grand with <button onClick={() => { selectAuthHotel(hotels[0]); setReservationCode("AG-7K92"); }}>AG-7K92</button></p>{contactRecovery && <section className="contact-recovery" aria-label="Retrieve reservation with registered contact"><span className="section-label">Reservation recovery</span><p>Enter both details registered with the selected hotel. Intellistay uses them only to find the matching reservation.</p><Field label="Registered email" value={guestEmail} onChange={(event) => setGuestEmail(event.target.value)} placeholder="maya@example.com" inputMode="email" /><Field label="Registered phone" value={guestPhone} onChange={(event) => setGuestPhone(event.target.value)} placeholder="+91 98765 43210" inputMode="tel" /></section>}</section>
+    <label className={`proactive-consent ${proactiveConsent ? "accepted" : ""}`}><input type="checkbox" checked={proactiveConsent} onChange={(event) => { setProactiveConsent(event.target.checked); setAuthError(""); }} /><span><strong>Enable proactive stay assistance</strong><small>I agree to in-app service suggestions at check-in and about once every hour during my stay. I can decline any suggestion or turn this off in Profile.</small></span></label>
     {authError && <p className="form-error"><ExclamationTriangleIcon /> {authError}</p>}
-    <button className="primary-button" onClick={login} data-testid="continue-button">{contactRecovery ? "Verify and find reservation" : "Verify stay"} <ChevronRightIcon /></button>
-    <p className="privacy-note">Demo data stays in memory and resets on reload. Intellistay does not read files, contacts, photos, or device history.</p>
+    <button className="primary-button" onClick={login} disabled={!proactiveConsent} data-testid="continue-button">{contactRecovery ? "Verify and find reservation" : "Verify stay"} <ChevronRightIcon /></button>
+    <p className="privacy-note">This prototype does not read files, contacts, photos, or device history. Room occupancy is kept on this browser so inventory changes can be demonstrated.</p>
   </main></MobileScroll>;
 
   const renderHome = () => <main className="screen-content home-screen" data-testid="home-screen">
@@ -845,7 +946,7 @@ export default function Prototype() {
   </main>;
 
   const renderConcierge = () => <main className="screen-content concierge-screen" data-testid="concierge-screen">
-    <header className="screen-header concierge-header"><button className="icon-button light-bg" aria-label="Back to home" onClick={() => changeView("home")}><ChevronLeftIcon /></button><div><span className="eyebrow">AI concierge</span><h1>How can I help?</h1></div><button className="credit-pill" onClick={() => setSheet("credits")} aria-label={`${credits} credits, view details`}><LightningBoltIcon /> {credits} <ChevronRightIcon /></button></header>
+    <header className="screen-header concierge-header"><button className="icon-button light-bg" aria-label="Back to home" onClick={() => changeView("home")}><ChevronLeftIcon /></button><div><span className="eyebrow">AI concierge</span><h1>How can I help?</h1></div><span className="ai-live-badge"><span className="live-dot" /> Live</span></header>
     <section className="interest-prompt"><span className="pulse-dot" /><div><small>Proactive suggestion</small><strong>{proactiveCopy.body}</strong></div><button onClick={() => openService(proactiveCopy.root)}>View</button></section>
     <div className="quick-actions service-shortcuts" aria-label="Concierge services">
       <button onClick={() => openStayFlow()}><IdCardIcon />{stayStage === "checked-in" ? "Checkout" : "Check in"}</button>
@@ -859,7 +960,7 @@ export default function Prototype() {
     </div>
     <section className="chat-thread" aria-live="polite">{messages.map((message, index) => <div key={`${message.from}-${index}`} className={`message ${message.from}`}>{message.from === "ai" && <span className="ai-avatar"><LightningBoltIcon /></span>}<p>{message.text}</p></div>)}{chatBusy && <div className="message ai"><span className="ai-avatar"><LightningBoltIcon /></span><p>Checking your stay context and hotel workflow…</p></div>}</section>
     <div className="chat-composer"><KeyboardInput value={chatInput} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void sendMessage(); }} placeholder="Ask me to book, change or resolve" aria-label="Ask Intellistay anything" /><button onClick={() => void sendMessage()} aria-label="Send message" disabled={chatBusy}><PaperPlaneIcon /></button></div>
-    <p className="ai-note"><CheckCircledIcon /> Agent-ready boundary · hotel tools only · 2 credits per estimated token</p>
+    <p className="ai-note"><CheckCircledIcon /> Property-aware concierge · tracked hotel actions</p>
   </main>;
 
   const renderRequests = () => <main className="screen-content requests-screen" data-testid="requests-screen">
@@ -871,7 +972,7 @@ export default function Prototype() {
 
   const renderProfile = () => <main className="screen-content profile-screen" data-testid="profile-screen">
     <header className="profile-hero"><span className="profile-avatar">{guest.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span><h1>{guest.name}</h1><p>{guest.hotel} · #{guest.reservation}</p></header>
-    <section className="profile-section"><span className="section-label">Stay & account</span><button onClick={() => setSheet("hotel")}><MagnifyingGlassIcon /><span><strong>Change participating hotel</strong><small>Search by hotel, city, region or pincode</small></span><ChevronRightIcon /></button><button onClick={() => openStayFlow()}><IdCardIcon /><span><strong>Check-in & checkout</strong><small>{stayStage.replaceAll("-", " ")} · room {selectedRoom?.id ?? guest.room ?? "not selected"}</small></span><ChevronRightIcon /></button><button onClick={openNearby}><SewingPinIcon /><span><strong>Explore hotel & nearby</strong><small>City guide and optional arrival-aware suggestions</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("checkout")}><FileTextIcon /><span><strong>Checkout & billing</strong><small>View, email or download both documents</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("notifications")}><BellIcon /><span><strong>Proactive notifications</strong><small>Push {pushEnabled ? "on" : "off"} · email {emailUpdates ? "on" : "off"}</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("feedback")}><HeartIcon /><span><strong>Share feedback</strong><small>Delivered to participating hotel operations</small></span><ChevronRightIcon /></button></section>
+    <section className="profile-section"><span className="section-label">Stay & account</span><button onClick={() => setSheet("hotel")}><MagnifyingGlassIcon /><span><strong>Change participating hotel</strong><small>Search by hotel, city, region or pincode</small></span><ChevronRightIcon /></button><button onClick={() => openStayFlow()}><IdCardIcon /><span><strong>Check-in & checkout</strong><small>{stayStage.replaceAll("-", " ")} · room {selectedRoom?.id ?? guest.room ?? "not selected"}</small></span><ChevronRightIcon /></button><button onClick={openNearby}><SewingPinIcon /><span><strong>Explore hotel & nearby</strong><small>City guide and optional arrival-aware suggestions</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("checkout")}><FileTextIcon /><span><strong>Checkout & billing</strong><small>View, email or download both documents</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("notifications")}><BellIcon /><span><strong>Proactive notifications</strong><small>Hourly suggestions {proactiveConsent ? "on" : "off"} · push {pushEnabled ? "on" : "off"}</small></span><ChevronRightIcon /></button><button onClick={() => setSheet("feedback")}><HeartIcon /><span><strong>Share feedback</strong><small>Delivered to participating hotel operations</small></span><ChevronRightIcon /></button></section>
     <section className="profile-section experience-switch-section"><span className="section-label">Access & role</span><button onClick={openOperationsPortal}><DashboardIcon /><span><strong>Hotel team sign in</strong><small>Approved property email or partner login required</small></span><ChevronRightIcon /></button></section>
     <section className="privacy-card"><CheckCircledIcon /><div><strong>Private demo mode</strong><p>No contacts, files, photos, location history, or device identifiers are read. Data resets on reload.</p></div></section>
     <button className="text-button" onClick={() => { setView("auth"); dismissKeyboard(); }}>Return to welcome & sign-in</button>
@@ -892,7 +993,7 @@ export default function Prototype() {
   </main>;
   */
 
-  const sheetTitle = sheet === "review" ? "Your adjusted plan" : sheet === "service" ? servicePath[servicePath.length - 1]?.label ?? "How can we help?" : sheet === "ticket" ? selectedTicket?.title ?? "Request" : sheet === "feedback" ? "Share feedback" : sheet === "checkout" ? "Checkout & billing" : sheet === "credits" ? "AI credits" : sheet === "notifications" ? "Proactive notifications" : sheet === "hotel" ? "Change hotel" : sheet === "stay" ? (stayFlowStep === "rooms" || stayFlowStep === "room-detail" ? "Select your room" : stayFlowStep.includes("checkout") ? "Mobile checkout" : "Mobile check-in") : sheet === "nearby" ? `Explore ${currentHotel.city}` : "";
+  const sheetTitle = sheet === "review" ? "Your adjusted plan" : sheet === "service" ? servicePath[servicePath.length - 1]?.label ?? "How can we help?" : sheet === "ticket" ? selectedTicket?.title ?? "Request" : sheet === "feedback" ? "Share feedback" : sheet === "checkout" ? "Checkout & billing" : sheet === "notifications" ? "Proactive notifications" : sheet === "hotel" ? "Change hotel" : sheet === "stay" ? (stayFlowStep === "rooms" || stayFlowStep === "room-detail" ? "Select your room" : stayFlowStep.includes("checkout") ? "Mobile checkout" : "Mobile check-in") : sheet === "nearby" ? `Explore ${currentHotel.city}` : sheet === "prompt" ? "A suggestion for your stay" : "";
 
   const renderSheetContent = () => {
     if (sheet === "review") return <div className="sheet-stack"><div className="change-row"><CheckCircledIcon /><div><strong>Flight AI-624</strong><span>Delayed 42 minutes · tracked live</span></div></div><div className="change-row"><CheckCircledIcon /><div><strong>Airport transfer</strong><span>Driver notified · pickup 19:30</span></div></div><div className="change-row"><ClockIcon /><div><strong>Dinner at Terrace</strong><span>Moved to 20:00 · table held</span></div></div><button className="primary-button" onClick={() => { setSheet(null); notify("Your updated plan is confirmed."); }}>Looks good <CheckCircledIcon /></button><button className="secondary-button" onClick={() => { setSheet(null); changeView("concierge"); }}>Ask for a change</button></div>;
@@ -900,19 +1001,19 @@ export default function Prototype() {
     if (sheet === "ticket" && selectedTicket) return <div className="sheet-stack"><div className="ticket-detail-head"><span className={`status-pill ${statusClass(selectedTicket.status)}`}>{selectedTicket.status}</span><span>{selectedTicket.id}</span></div><p className="ticket-detail-copy">{selectedTicket.detail}</p><div className="ticket-timeline"><div className="done"><CheckCircledIcon /><span><strong>Request received</strong><small>Routed to {selectedTicket.department}</small></span></div><div className={selectedTicket.status === "New" ? "current" : "done"}>{selectedTicket.status === "New" ? <ClockIcon /> : <CheckCircledIcon />}<span><strong>Team acknowledged</strong><small>{selectedTicket.status === "New" ? "Reminder active" : "In progress"}</small></span></div><div className={selectedTicket.status === "Resolved" || selectedTicket.status === "Closed" ? "done" : "future"}><CheckCircledIcon /><span><strong>Resolved</strong><small>{selectedTicket.status === "Resolved" || selectedTicket.status === "Closed" ? "Complete" : "Waiting"}</small></span></div></div><button className="secondary-button" onClick={() => setSheet("feedback")}>Rate this service</button></div>;
     if (sheet === "stay") return <div className="sheet-stack stay-flow" data-testid={`stay-flow-${stayFlowStep}`}>
       {stayFlow.length > 1 && !stayFlowStep.includes("pending") && <button className="back-link" onClick={backStayStep}><ChevronLeftIcon /> Back</button>}
-      {stayFlowStep === "rooms" && <><div className="stay-ai-prompt"><span><LightningBoltIcon /></span><div><small>Recommended before arrival</small><strong>Choose from live demo inventory</strong><p>Front Desk confirms the final room after checking readiness and any operational change.</p></div></div><div className="room-inventory">{roomInventory.map((room) => <button key={room.id} className="room-card" onClick={() => { setSelectedRoom(room); pushStayStep("room-detail"); }} data-testid={`room-${room.id}`}><span className={`room-photo ${room.position}`} role="img" aria-label={`${room.name} preview`} /> <span className="room-card-copy"><span><strong>{room.name}</strong><small>Room {room.id} · {room.floor}</small></span><em>{room.upgrade}</em></span><span className="room-card-features">{room.bed} · {room.size} · {room.view}</span>{room.accessible && <span className="room-accessible"><AccessibilityIcon /> Accessible layout</span>}</button>)}</div></>}
-      {stayFlowStep === "room-detail" && selectedRoom && <><span className={`room-detail-photo room-photo ${selectedRoom.position}`} role="img" aria-label={`${selectedRoom.name} room preview`} /><div className="room-detail-heading"><div><span className="eyebrow">Available now · Room {selectedRoom.id}</span><h2>{selectedRoom.name}</h2></div><strong>{selectedRoom.upgrade}</strong></div><p className="room-detail-feature">{selectedRoom.feature}</p><div className="room-fact-grid"><span><small>Bed</small><strong>{selectedRoom.bed}</strong></span><span><small>Size</small><strong>{selectedRoom.size}</strong></span><span><small>View</small><strong>{selectedRoom.view}</strong></span><span><small>Floor</small><strong>{selectedRoom.floor}</strong></span></div><p className="inventory-note"><ClockIcon /> Demo inventory snapshot. The hotel confirms room readiness before check-in.</p><button className="primary-button" onClick={() => pushStayStep("checkin")}>Select this room <ChevronRightIcon /></button></>}
-      {stayFlowStep === "checkin" && selectedRoom && <><div className="selected-request stay-selection"><CheckCircledIcon /><span><small>Selected room</small><strong>{selectedRoom.name} · {selectedRoom.id}</strong></span></div><div className="stay-time-block"><span className="section-label">When will you arrive?</span><p>The AI uses this timing to sequence room readiness and any arrival assistance.</p><div className="time-options">{[guest.arrival, "20:00", "22:00"].filter((time, index, all) => all.indexOf(time) === index).map((time) => <button key={time} className={checkInTime === time ? "selected" : ""} onClick={() => setCheckInTime(time)}><strong>{time}</strong><small>{time === guest.arrival ? "Reservation estimate" : "Updated arrival"}</small></button>)}</div></div><div className="stay-confirm-summary"><span><SewingPinIcon /> {currentHotel.name}</span><span><IdCardIcon /> {guest.name}</span><span><ClockIcon /> Arrival {checkInTime}</span></div><button className="primary-button" onClick={submitCheckIn} data-testid="submit-checkin">Send check-in to hotel <ChevronRightIcon /></button><p className="inventory-note">This does not issue a digital key. Front Desk can confirm, call, or adjust the room based on availability.</p></>}
-      {stayFlowStep === "checkin-pending" && <><div className="stay-pending-state"><span className={stayStage === "checked-in" ? "complete" : "waiting"}>{stayStage === "checked-in" ? <CheckCircledIcon /> : <ClockIcon />}</span><span className="eyebrow">{stayStage === "checked-in" ? "Hotel confirmed" : "Front Desk action required"}</span><h2>{stayStage === "checked-in" ? "You are checked in" : "Your check-in is being reviewed"}</h2><p>{stayStage === "checked-in" ? `Room ${selectedRoom?.id ?? guest.room} is confirmed. Your in-stay concierge is active.` : `${selectedRoom?.name ?? "Your selected room"} is held for arrival at ${checkInTime}. The hotel may call or propose another room if readiness changes.`}</p></div>{stayStage === "checked-in" ? <><button className="primary-button" onClick={() => { setSheet(null); openNearby(); }}>Explore hotel & nearby <ChevronRightIcon /></button><button className="secondary-button" onClick={() => { setSheet(null); openService("Dining & Reservations"); }}>Room service & dining</button></> : <button className="secondary-button" onClick={() => { setSheet(null); setView("requests"); }}>Track in My Requests</button>}</>}
-      {stayFlowStep === "checkout" && <>{stayStage !== "checked-in" && stayStage !== "checkout-requested" ? <div className="stay-pending-state"><span className="waiting"><ClockIcon /></span><h2>Check-in confirmation comes first</h2><p>Once Front Desk confirms the room, mobile checkout and departure timing become available.</p></div> : <><div className="stay-ai-prompt"><span><LightningBoltIcon /></span><div><small>Departure assistant</small><strong>When do you plan to leave?</strong><p>I will ask Front Desk to review the folio, room status, and baggage timing.</p></div></div><div className="time-options checkout-times">{["10:00", "12:00", "14:00"].map((time) => <button key={time} className={checkOutTime === time ? "selected" : ""} onClick={() => setCheckOutTime(time)}><strong>{time}</strong><small>{time === "12:00" ? "Standard checkout" : time === "14:00" ? "Subject to approval" : "Early departure"}</small></button>)}</div><div className="stay-confirm-summary"><span><IdCardIcon /> Room {selectedRoom?.id ?? guest.room}</span><span><FileTextIcon /> Folio review</span><span><ClockIcon /> Leave at {checkOutTime}</span></div><button className="primary-button" onClick={submitCheckout} data-testid="submit-checkout">Send checkout to hotel <ChevronRightIcon /></button></>}</>}
+      {stayFlowStep === "rooms" && <><div className="stay-ai-prompt"><span><LightningBoltIcon /></span><div><small>Your reservation match</small><strong>{guest.roomType} room · {guest.guests} guest{guest.guests === 1 ? "" : "s"}</strong><p>Only rooms that fit the booked room type and guest count are shown. An available selection completes check-in immediately.</p></div></div>{eligibleRooms.length > 0 && <div className="room-inventory">{eligibleRooms.map((room) => { const available = roomIsAvailable(room); return <button key={room.id} className={`room-card ${available ? "" : "unavailable"}`} disabled={!available} onClick={() => { setSelectedRoom(room); pushStayStep("room-detail"); }} data-testid={`room-${room.id}`}><span className={`room-photo ${room.position}`} role="img" aria-label={`${room.name} preview`} /><span className="room-card-copy"><span><strong>{room.name}</strong><small>Room {room.id} · {room.floor}</small></span><em>{available ? room.upgrade : "Booked"}</em></span><span className="room-card-features">{room.bed} · up to {room.capacity} guests · {room.view}</span>{room.accessible && <span className="room-accessible"><AccessibilityIcon /> Accessible layout</span>}</button>; })}</div>}{availableRooms.length === 0 && <section className="no-room-state"><span><ExclamationTriangleIcon /></span><h2>No matching room is available</h2><p>Your reservation is for a {guest.roomType.toLowerCase()} room for {guest.guests} guests. Front Desk can review another suitable room or assist with arrival.</p><a href={`tel:${currentHotel.frontDeskPhone.replace(/[^+\d]/g, "")}`}><MobileIcon /> Call {currentHotel.frontDeskPhone}</a><small>Demo property phone number. A participating hotel supplies its live number.</small></section>}</>}
+      {stayFlowStep === "room-detail" && selectedRoom && <><span className={`room-detail-photo room-photo ${selectedRoom.position}`} role="img" aria-label={`${selectedRoom.name} room preview`} /><div className="room-detail-heading"><div><span className="eyebrow">Available now · Room {selectedRoom.id}</span><h2>{selectedRoom.name}</h2></div><strong>{selectedRoom.upgrade}</strong></div><p className="room-detail-feature">{selectedRoom.feature}</p><div className="room-fact-grid"><span><small>Reservation type</small><strong>{selectedRoom.roomType}</strong></span><span><small>Capacity</small><strong>Up to {selectedRoom.capacity} guests</strong></span><span><small>View</small><strong>{selectedRoom.view}</strong></span><span><small>Floor</small><strong>{selectedRoom.floor}</strong></span></div><p className="inventory-note"><ClockIcon /> Availability is checked again when you complete check-in.</p><button className="primary-button" onClick={() => pushStayStep("checkin")}>Select this room <ChevronRightIcon /></button></>}
+      {stayFlowStep === "checkin" && selectedRoom && <><div className="selected-request stay-selection"><CheckCircledIcon /><span><small>Selected room</small><strong>{selectedRoom.name} · {selectedRoom.id}</strong></span></div><div className="stay-time-block"><span className="section-label">When will you arrive?</span><p>The AI uses this timing to sequence room readiness and arrival services.</p><div className="time-options">{[guest.arrival, "20:00", "22:00"].filter((time, index, all) => all.indexOf(time) === index).map((time) => <button key={time} className={checkInTime === time ? "selected" : ""} onClick={() => setCheckInTime(time)}><strong>{time}</strong><small>{time === guest.arrival ? "Reservation estimate" : "Updated arrival"}</small></button>)}</div></div><div className="stay-confirm-summary"><span><SewingPinIcon /> {currentHotel.name}</span><span><IdCardIcon /> {guest.name} · {guest.guests} guests</span><span><ClockIcon /> Arrival {checkInTime}</span></div><button className="primary-button" onClick={submitCheckIn} data-testid="submit-checkin">Complete check-in <ChevronRightIcon /></button><p className="inventory-note">Completing check-in marks this room occupied and immediately notifies hotel operations.</p></>}
+      {stayFlowStep === "checkin-pending" && <><div className="stay-pending-state"><span className="complete"><CheckCircledIcon /></span><span className="eyebrow">Check-in successful</span><h2>You are checked in</h2><p>Room {selectedRoom?.id ?? guest.room} is occupied in the demo inventory. Hotel operations received the completed check-in update.</p></div><button className="primary-button" onClick={() => { setSheet(null); openNearby(); }}>Explore hotel & nearby <ChevronRightIcon /></button><button className="secondary-button" onClick={() => { setSheet(null); openService("Dining & Reservations"); }}>Room service & dining</button></>}
+      {stayFlowStep === "checkout" && <>{stayStage !== "checked-in" && stayStage !== "checkout-requested" ? <div className="stay-pending-state"><span className="waiting"><ClockIcon /></span><h2>Complete check-in first</h2><p>Select an available room and complete mobile check-in before planning checkout.</p></div> : <><div className="stay-ai-prompt"><span><LightningBoltIcon /></span><div><small>Departure assistant</small><strong>When do you plan to leave?</strong><p>I will ask Front Desk to review the folio, room status, and baggage timing.</p></div></div><div className="time-options checkout-times">{["10:00", "12:00", "14:00"].map((time) => <button key={time} className={checkOutTime === time ? "selected" : ""} onClick={() => setCheckOutTime(time)}><strong>{time}</strong><small>{time === "12:00" ? "Standard checkout" : time === "14:00" ? "Subject to approval" : "Early departure"}</small></button>)}</div><div className="stay-confirm-summary"><span><IdCardIcon /> Room {selectedRoom?.id ?? guest.room}</span><span><FileTextIcon /> Folio review</span><span><ClockIcon /> Leave at {checkOutTime}</span></div><button className="primary-button" onClick={submitCheckout} data-testid="submit-checkout">Send checkout to hotel <ChevronRightIcon /></button></>}</>}
       {stayFlowStep === "checkout-pending" && <><div className="stay-pending-state"><span className={stayStage === "checked-out" ? "complete" : "waiting"}>{stayStage === "checked-out" ? <CheckCircledIcon /> : <ClockIcon />}</span><span className="eyebrow">{stayStage === "checked-out" ? "Hotel confirmed" : "Folio review in progress"}</span><h2>{stayStage === "checked-out" ? "You are checked out" : "Checkout request received"}</h2><p>{stayStage === "checked-out" ? "The stay is complete and both billing documents are ready." : `Front Desk is reviewing your ${checkOutTime} departure, room status, and final folio.`}</p></div>{stayStage === "checked-out" ? <button className="primary-button" onClick={() => setSheet("checkout")}>View billing documents <ChevronRightIcon /></button> : <button className="secondary-button" onClick={() => { setSheet(null); setView("requests"); }}>Track in My Requests</button>}</>}
       <button className="cancel-button" onClick={cancelStayFlow}>{stayFlowStep.includes("pending") ? "Done" : "Cancel"}</button>
     </div>;
     if (sheet === "nearby") return <div className="sheet-stack nearby-guide" data-testid="nearby-guide"><div className="stay-ai-prompt"><span><SewingPinIcon /></span><div><small>Based on {currentHotel.name}</small><strong>Explore {currentHotel.city} your way</strong><p>Choose a category, then open directions in the maps app you prefer.</p></div></div>{stayStage === "checked-in" && <section className="location-consent"><div><span className={`location-state ${locationState}`}><SewingPinIcon /></span><span><strong>{locationState === "at-hotel" ? "Arrival-aware suggestions active" : "Prioritize what is useful right now"}</strong><small>{locationState === "at-hotel" ? "Hotel context is active. Exact coordinates are not retained." : "Optional one-time location check. City recommendations work without it."}</small></span></div><button className="secondary-button" onClick={requestGuestLocation} disabled={locationState === "checking"}>{locationState === "checking" ? "Requesting permission…" : "Use my location once"}</button><button className="text-button" onClick={useDemoHotelLocation}>Use demo hotel location</button></section>}<div className="nearby-categories">{["All", ...Array.from(new Set(nearbyPlaces.map((place) => place.category)))].map((category) => <button key={category} className={nearbyCategory === category ? "active" : ""} onClick={() => setNearbyCategory(category)}>{category}</button>)}</div><div className="nearby-list">{visibleNearby.map((place) => <article key={place.name}><div><span className="nearby-category">{place.category}</span><h2>{place.name}</h2><p>{place.plan}</p><small>{place.travelMode === "walking" ? "Good on foot" : place.travelMode === "transit" ? "Public transport option" : "Best by ride or drive"}</small></div><div className="map-actions"><a href={googleDirectionsUrl(place)} target="_blank" rel="noreferrer">Google Maps</a><a href={appleDirectionsUrl(place)} target="_blank" rel="noreferrer">Apple Maps</a></div></article>)}</div><p className="inventory-note">Directions open outside Intellistay. Check current hours, traffic, accessibility, and venue policies before leaving.</p><button className="cancel-button" onClick={() => setSheet(null)}>Done</button></div>;
     if (sheet === "feedback") return <div className="sheet-stack"><div className="delivery-note"><EnvelopeClosedIcon /><span>Feedback is delivered to <strong>{currentHotel.opsEmail}</strong> and appears in Operations.</span></div><label className="field"><span>What are you rating?</span><select value={feedbackType} onChange={(event) => setFeedbackType(event.target.value)}><option>Service request</option><option>Concierge</option><option>Room</option><option>Dining</option><option>Checkout</option><option>Other</option></select></label><div className="rating-control" aria-label="Rating required">{[1, 2, 3, 4, 5].map((value) => <button key={value} className={rating >= value ? "selected" : ""} aria-label={`${value} star${value > 1 ? "s" : ""}`} onClick={() => setRating(value)}><StarIcon /></button>)}</div><p className="rating-help">Rating is required; comments are optional.</p><label className="field"><span>Comments (optional)</span><KeyboardTextarea value={feedbackComment} onChange={(event) => setFeedbackComment(event.target.value)} placeholder="Tell the hotel what stood out" rows={4} /></label><button className="primary-button" disabled={!rating} onClick={submitFeedback}>Submit feedback</button></div>;
     if (sheet === "checkout") return <div className="sheet-stack"><div className="paid-banner"><CheckCircledIcon /><div><strong>Paid in full</strong><span>Final balance ₹0</span></div></div><div className="segment-control bill-tabs" role="tablist" aria-label="Billing document"><button role="tab" aria-selected={billView === "Invoice"} className={billView === "Invoice" ? "active" : ""} onClick={() => setBillView("Invoice")}>View invoice</button><button role="tab" aria-selected={billView === "Itemized Bill"} className={billView === "Itemized Bill" ? "active" : ""} onClick={() => setBillView("Itemized Bill")}>Itemized bill</button></div><div className="bill-summary"><div><span>Room · 2 nights</span><strong>₹48,000</strong></div>{billView === "Itemized Bill" && <><div><span>Dining · Terrace</span><strong>₹6,850</strong></div><div><span>Spa · Cabana</span><strong>₹4,200</strong></div></>}<div className="total"><span>Total paid</span><strong>₹59,050</strong></div></div><Field label="Email receipt" value={receiptEmail} onChange={(event) => setReceiptEmail(event.target.value)} placeholder="Enter email for guest access" inputMode="email" /><button className="primary-button" onClick={emailReceipt}><EnvelopeClosedIcon /> Email {billView.toLowerCase()}</button><button className="secondary-button" onClick={() => void downloadStayPdf(billView)}><DownloadIcon /> Download {billView.toLowerCase()} PDF</button><p className="privacy-note compact"><CheckCircledIcon /> Review first, then choose email or local PDF.</p></div>;
-    if (sheet === "credits") return <div className="sheet-stack credits-sheet"><div className="credit-balance"><LightningBoltIcon /><div><small>Available balance</small><strong>{credits} credits</strong></div></div><p>Intellistay uses 2 credits for each estimated AI token. Hotel actions themselves do not use credits.</p><div className="usage-list">{creditUsage.map((item, index) => <div key={`${item.label}-${index}`}><span>{item.label}</span><strong>−{item.amount}</strong></div>)}</div><button className="primary-button" onClick={() => { setCredits((current) => current + 500); notify("500 demo credits added."); }}>Add 500 demo credits</button><button className="cancel-button" onClick={() => setSheet(null)}>Done</button></div>;
-    if (sheet === "notifications") return <div className="sheet-stack"><div className="notification-setting"><div><strong>Push notifications</strong><span>Request updates and proactive stay suggestions</span></div><button className={pushEnabled ? "toggle on" : "toggle"} aria-pressed={pushEnabled} onClick={() => pushEnabled ? setPushEnabled(false) : void requestPushPermission()}><span /></button></div><div className="notification-setting"><div><strong>Email notifications</strong><span>Send the same confirmations to {receiptEmail || "your email"}</span></div><button className={emailUpdates ? "toggle on" : "toggle"} aria-pressed={emailUpdates} onClick={() => setEmailUpdates((value) => !value)}><span /></button></div><p className="notification-consent">Push is requested here, after its value is clear. Private or medical details never appear in notification previews.</p><div className="notice-list">{notices.map((notice) => <article key={notice.id}><span className="live-dot" /><div><strong>{notice.title}</strong><p>{notice.body}</p></div></article>)}</div><button className="cancel-button" onClick={() => setSheet(null)}>Done</button></div>;
+    if (sheet === "prompt" && proactivePrompt) return <div className="sheet-stack proactive-service-prompt"><div className="prompt-orb"><BellIcon /></div><span className="eyebrow">Proactive stay assistant</span><h2>{proactivePrompt.title}</h2><p>{proactivePrompt.body}</p><button className="primary-button" onClick={() => handleProactiveAction(proactivePrompt.action)}>{proactivePrompt.actionLabel} <ChevronRightIcon /></button><button className="secondary-button" onClick={() => { setProactivePrompt(null); setSheet(null); notify("No problem. I’ll suggest a different service in about an hour."); }}>Not now</button><button className="cancel-button" onClick={() => { setProactiveConsent(false); setProactivePrompt(null); setSheet(null); notify("Hourly suggestions are off. You can re-enable them in Profile."); }}>Turn off hourly suggestions</button><small>Suggestion {promptIndex + 1} of {proactivePromptDeck.length}. Declining never creates a hotel request.</small></div>;
+    if (sheet === "notifications") return <div className="sheet-stack"><div className="notification-setting"><div><strong>Hourly stay suggestions</strong><span>One relevant service at a time during your active stay</span></div><button className={proactiveConsent ? "toggle on" : "toggle"} aria-pressed={proactiveConsent} onClick={() => setProactiveConsent((value) => !value)}><span /></button></div><div className="notification-setting"><div><strong>Push notifications</strong><span>Request updates and proactive stay suggestions</span></div><button className={pushEnabled ? "toggle on" : "toggle"} aria-pressed={pushEnabled} onClick={() => pushEnabled ? setPushEnabled(false) : void requestPushPermission()}><span /></button></div><div className="notification-setting"><div><strong>Email notifications</strong><span>Send the same confirmations to {receiptEmail || "your email"}</span></div><button className={emailUpdates ? "toggle on" : "toggle"} aria-pressed={emailUpdates} onClick={() => setEmailUpdates((value) => !value)}><span /></button></div><p className="notification-consent">Hourly suggestions are consent-controlled. Push permission is requested separately. Private or medical details never appear in notification previews.</p><div className="notice-list">{notices.map((notice) => notice.action ? <button key={notice.id} onClick={() => handleProactiveAction(notice.action!)}><span className="live-dot" /><span><strong>{notice.title}</strong><p>{notice.body}</p><small>Open suggestion <ChevronRightIcon /></small></span></button> : <article key={notice.id}><span className="live-dot" /><div><strong>{notice.title}</strong><p>{notice.body}</p></div></article>)}</div><button className="cancel-button" onClick={() => setSheet(null)}>Done</button></div>;
     if (sheet === "hotel") return <div className="sheet-stack">{renderHotelSearch(true)}<p className="privacy-note compact">Only hotels contracted with Intellistay appear here. Selecting a hotel updates available services and hotel operations routing.</p><button className="cancel-button" onClick={() => { setHotelSearch(""); setSheet(null); }}>Cancel</button></div>;
     return null;
   };
@@ -1115,6 +1216,8 @@ export function WebOperationsDashboard() {
   const channelRef = useRef<BroadcastChannel | null>(null);
 
   const hotel = hotels.find((item) => item.name === session?.hotelName) ?? initialHotel;
+  const occupiedInventory = Object.entries(readDemoInventory()).filter(([key]) => key.startsWith(`${hotel.name}::`));
+  const availableInventoryCount = Math.max(0, roomInventory.length - occupiedInventory.length);
   const showToast = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 3200); };
 
   useEffect(() => {
@@ -1219,6 +1322,7 @@ export function WebOperationsDashboard() {
     }
     if (activeTicket?.title.startsWith("Mobile checkout") && (status === "Resolved" || status === "Closed")) {
       const time = activeTicket.title.match(/(\d{2}:\d{2})/)?.[1];
+      releaseDemoRoom(hotel.name, activeTicket.room);
       channelRef.current?.postMessage({ type: "stay-status", stage: "checked-out", time } satisfies DemoSyncEvent);
       const saved = readDemoStaySession();
       if (saved) writeDemoStaySession({ ...saved, stage: "checked-out", checkOutTime: time ?? saved.checkOutTime, ticket: saved.ticket ? { ...saved.ticket, status } : saved.ticket });
@@ -1244,6 +1348,8 @@ export function WebOperationsDashboard() {
   const departmentStats = (["Front Desk", "Concierge", "Maintenance", "Housekeeping", "Dining", "Reservations"] as Department[]).map((department) => ({ department, count: tickets.filter((ticket) => ticket.department === department).length, active: tickets.filter((ticket) => ticket.department === department && (ticket.status === "New" || ticket.status === "In progress" || ticket.status === "Dead")).length }));
   const metrics = [
     { label: "Requests raised", value: raised, note: `${period} property total` },
+    { label: "Rooms occupied", value: occupiedInventory.length, note: "Includes mobile check-ins" },
+    { label: "Rooms available", value: availableInventoryCount, note: "Current demo inventory" },
     { label: "In progress", value: inProgress, note: "Actively owned" },
     { label: "Dead / breached", value: dead, note: "Needs recovery", alert: true },
     { label: "Resolved", value: resolved, note: "Awaiting closure" },
